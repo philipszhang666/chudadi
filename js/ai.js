@@ -156,7 +156,8 @@ var AI = (function () {
   // struct/five/cost 的取值是 tests/bench-ai.js 上扫出来的（见该文件「领出策略」一节）：
   // five 从 0 一路加到 100，交叉对局头游率从 55.5% 升到 57.7% 后在 28 附近封顶，
   // 所以取 28（≈「只要不拆牌型，有五张就先走五张」）。
-  var LEAD_CFG = { struct: 12, five: 28, cost: 0.3, fiveMin: 0.5, urgent: 12, race: 0, safe: 0 };
+  // allSingle2nd: 整手都是单张时，不甩最小的、从「自己牌的第 2 小」开始出（见 chooseLead）
+  var LEAD_CFG = { struct: 12, five: 28, cost: 0.3, fiveMin: 0.5, urgent: 12, race: 0, safe: 0, allSingle2nd: true };
 
   // 五张牌型「打出去之后大概守得住」的先验（越难被压越接近 1）
   var FIVE_SAFETY_BASE = {
@@ -313,6 +314,19 @@ var AI = (function () {
     var useSafety = cfg.fiveSafety !== false;
     var W_HOLD = cfg.holdW !== undefined ? cfg.holdW : 0;   // 概率化威胁权重（V1=0）
     var W_SAFE = cfg.safe !== undefined ? cfg.safe : LEAD_CFG.safe;   // 过牌反推（hardv3）
+
+    // 整手都是单张（组不出对子/三条/顺子/五张）时的领出修正：
+    // 不留最小的、改从「自己牌的第 2 小」开始出。
+    //   例：对手只剩 1 张 —— 先出最小，只要它压得过就输了；先出第 2 小，
+    //   它的牌落在「最小~第2小」之间时反而压不过、只能过牌，主动权仍在自己手里。
+    var W_AS2 = cfg.allSingle2nd !== undefined ? cfg.allSingle2nd : (LEAD_CFG.allSingle2nd !== false);
+    if (W_AS2 && p.hand.length >= 2 && moves.length >= 2 &&
+        moves.every(function (m) { return m.size === 1; })) {
+      var singleAsc = moves.slice().sort(function (a, b) {
+        return _CD.compareCard(a.main, b.main);
+      });
+      return singleAsc[1];
+    }
 
     var known = knownCards(state, p);
     var urgency = opponentUrgency(state, p);
