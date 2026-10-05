@@ -756,6 +756,46 @@ section('11. 空座位补位 + 真人座位不被电脑顶掉');
 })();
 
 /* ============================================================
+   12. 权限：只有房主能改设置、能开局
+   ============================================================
+   界面上靠隐藏开关（applyRoleVisibility）让客户端看不到，
+   但界面是「提示」，真正的边界必须在服务端。
+   这里从协议层直接打这两个动作，确认房主会拒。 */
+section('12. 权限：只有房主能改设置 / 开局');
+
+(function () {
+  var g = setupGame({ playerCount: 4, landlord: false, nonA3ToLast: false, humans: 4 });
+
+  // ---- 改设置 ----
+  var before = JSON.stringify(g.room.config);
+  ok(before.indexOf('"playerCount":4') >= 0, '初始配置是 4 人局', before);
+
+  // 直接伪造一条「客户端改设置」的消息（绕过界面）
+  g.room.onData({ type: P.C2H.LOBBY_SET, config: { playerCount: 3, landlord: true } }, g.conns[1]);
+  var after = JSON.stringify(g.room.config);
+  ok(after === before, '客户端发的改设置被忽略，配置没变', after);
+
+  // 房主自己改才生效
+  g.room.setConfig({ playerCount: 3 });
+  ok(g.room.config.playerCount === 3, '房主改设置生效（playerCount → 3）');
+
+  // ---- 开局的入口校验 ----
+  // startGame 只在房主那一端有意义：客户端根本不持有权威 state，
+  // 客户端上的 room.isHost 为 false，所以同名的调用会被第一步挡掉。
+  // 这里能测的是房主侧的前置条件。
+  var notEnough = setupGame({ playerCount: 4, landlord: false, nonA3ToLast: false, humans: 1 });
+  var r0 = notEnough.room.startGame();
+  ok(!r0.ok, '只有房主一个人时开不了局', r0.reason);
+
+  var okRoom = setupGame({ playerCount: 4, landlord: false, nonA3ToLast: false, humans: 2 });
+  var r1 = okRoom.room.startGame();
+  ok(r1.ok, '有 2 个人就能开局', r1.reason);
+
+  var r2 = okRoom.room.startGame();
+  ok(!r2.ok, '一局还没结束时不能再开一局', r2.reason);
+})();
+
+/* ============================================================
    汇总（放最后：第 5 节和第 11 节都是异步的）
    ============================================================ */
 function finish() {

@@ -138,6 +138,7 @@
     var modeLabel = settings.landlord ? 'A3 地主' : settings.playerCount + ' 人';
     var sum = $('setupSummary');
     if (sum) sum.textContent = modeLabel + ' · ' + labels[settings.difficulty];
+    applyRoleVisibility();   // 谁能改哪些开关，跟着角色走
   }
 
   /** 高精度计时（拿不到 performance 时退化成 Date.now） */
@@ -1632,6 +1633,8 @@
             : '人都到齐了就点「开始游戏」；没坐满的座位交给电脑')
         : '已连上房主，等房主点「开始游戏」…（人不够时房主的电脑会补位）';
     }
+
+    applyRoleVisibility();   // 客户端不该看到房主的开关
   }
 
   function showLobbyOverlay() {
@@ -1999,6 +2002,42 @@
     applySettingsToUI();
   }
 
+  /** 这一局按什么规则打（给人看的文本） */
+  function configSummary() {
+    var mode = settings.landlord ? 'A3 地主（4 人暗队）' : (settings.playerCount + ' 人局');
+    var diff = { easy: '简单', normal: '普通', hard: '困难' }[settings.difficulty] || settings.difficulty;
+    return mode + ' · 电脑难度：' + diff
+      + (settings.nonA3ToLast && !settings.landlord ? ' · 打到末游' : '');
+  }
+
+  /**
+   * 把「只有房主能改的开关」按角色显示。
+   * 之前只是给这些开关加了点击守卫，结果客户端点下去什么都不动 ——
+   * 拒绝提示还打在牌桌底部、被设置浮层整个盖住，看着就像界面坏了。
+   * 现在客户端直接看不到这些开关，改成「当前规则」只读摘要。
+   */
+  function applyRoleVisibility() {
+    var isClient = (mode === 'online' && !netIsHost);
+
+    var rows = document.querySelectorAll('.host-only');
+    Array.prototype.forEach.call(rows, function (row) {
+      row.hidden = isClient;
+    });
+
+    var settingsNote = $('settingsHostNote');
+    if (settingsNote) settingsNote.hidden = !isClient;
+
+    var readOnly = $('lobbyReadonly');
+    if (readOnly) {
+      readOnly.hidden = !isClient;
+      if (isClient) readOnly.textContent = '本局规则（房主设定）：' + configSummary();
+    }
+
+    // 客户端连「开始游戏」都看不到（服务端也会拒，这里只是别让界面骗人）
+    var startBtn = $('btnLobbyStart');
+    if (startBtn && mode === 'online') startBtn.hidden = isClient;
+  }
+
   /** 「游戏人数」三选一：A3 地主 = 4 人局 + ♠A/♠3 暗队 */
   function bindPlayerMode() {
     var box = $('segPlayers');
@@ -2074,6 +2113,11 @@
       setTip(settings.dimUnplayable ? '已打开：不能出的牌会灰显' : '已关闭：手牌不做任何提示');
     });
     bindSegment('segNonA3ToLast', 'nonA3ToLast', function () {
+      // 这条守卫原来是漏的：客户端能拨动它、还会写进自己的存档。
+      // 服务端不认（room.setConfig 只收房主的），房主广播后也会覆盖回来，
+      // 但中间那段时间面板在骗人 —— 现在补齐。
+      if (!canEditGameSetup()) { refuseSetupEdit(); return; }
+      if (mode === 'online' && netIsHost) lobbySetConfig({ nonA3ToLast: settings.nonA3ToLast });
       setTip(settings.nonA3ToLast
         ? '已打开：非 A3 局打到末游，按名次判胜负（下一局生效）'
         : '已关闭：非 A3 局头游即结束');

@@ -870,3 +870,27 @@ html, body {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* 联机角色可见性：只有房主能改的开关，客户端直接隐藏，
+   改成一句「本局规则」只读摘要（见 ui.js 的 applyRoleVisibility） */
+.host-only[hidden] { display: none !important; }
+.host-only-note {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: rgba(232, 195, 122, .1);
+  border: 1px solid rgba(232, 195, 122, .28);
+  font-size: 12px;
+  line-height: 1.6;
+  color: #d8c9a4;
+}
+.host-only-note[hidden] { display: none; }
+.lobby-readonly {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .05);
+  font-size: 12px;
+  color: #cfe3d8;
+}
+.lobby-readonly[hidden] { display: none; }

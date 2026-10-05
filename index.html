@@ -173,7 +173,7 @@
     </div>
 
     <div class="set-list lobby-config">
-      <div class="set-row">
+      <div class="set-row host-only">
         <div class="set-label">
           <b>游戏人数</b>
           <small>座位数由房主决定。人没坐满时空位交给电脑；
@@ -184,6 +184,8 @@
           <button class="seg" data-value="4">4 人</button>
         </div>
       </div>
+      <!-- 客户端看到的只读摘要：让每个人都知道这一局按什么规则打 -->
+      <p class="set-note lobby-readonly" id="lobbyReadonly" hidden></p>
     </div>
   </div>
 </div>
@@ -192,9 +194,13 @@
 <div class="overlay" id="settingsOverlay" hidden>
   <div class="dialog">
     <h2>设置</h2>
+    <p class="set-note host-only-note" id="settingsHostNote" hidden>
+      联机时<b>人数 / 玩法 / 电脑难度 / 思考速度</b>由房主决定，你这边看不到这些开关。
+      <b>音效</b>和<b>灰显提示</b>是你自己设备上的偏好，随时可改。
+    </p>
     <div class="set-list">
 
-      <div class="set-row">
+      <div class="set-row host-only">
         <div class="set-label">
           <b>游戏人数</b>
           <small>3 人局：52 张按 17 张发，余下 1 张随机补给其中一人（18/17/17）；<br>
@@ -207,7 +213,7 @@
         </div>
       </div>
 
-      <div class="set-row">
+      <div class="set-row host-only">
         <div class="set-label">
           <b>非 A3 打到末游</b>
           <small>仅对 3 人 / 4 人局生效（A3 地主不受影响）。打开后不再「头游即结束」，而是打到你的名次定下来：
@@ -219,7 +225,7 @@
         </div>
       </div>
 
-      <div class="set-row">
+      <div class="set-row host-only">
         <div class="set-label">
           <b>电脑难度</b>
           <small>简单=贪心；普通=记牌+手牌结构+该不该压；困难=ISMCTS 搜索（更强但更慢）</small>
@@ -231,7 +237,7 @@
         </div>
       </div>
 
-      <div class="set-row">
+      <div class="set-row host-only">
         <div class="set-label">
           <b>电脑思考速度</b>
           <small>每步目标时长：慢 1200 / 普通 800 / 快 400 ms。先算再补时，算得慢就不再等</small>
