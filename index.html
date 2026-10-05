@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>锄大地 · 改版（3 最大）</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -269,6 +269,17 @@
   </div>
 </div>
 
+<!-- 手机竖屏提示：竖着拿时盖住牌桌，提示横屏（纯 CSS 控制显隐，见 styles.css）。
+     能锁方向的浏览器（Android）会显示「全屏并横屏」按钮，一键锁成横屏。 -->
+<div id="rotateHint" class="rotate-hint" aria-hidden="true">
+  <div class="rotate-box">
+    <div class="rotate-icon">📱</div>
+    <strong>请横屏使用</strong>
+    <span>把手机横过来，牌桌看得更清楚</span>
+    <button id="rotateBtn" class="btn primary" hidden>全屏并横屏</button>
+  </div>
+</div>
+
 <script src="js/cards.js"></script>
 <script src="js/game.js"></script>
 <script src="js/determinize.js"></script>
@@ -277,5 +288,6 @@
 <script src="js/ai.js"></script>
 <script src="js/sound.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/orientation.js"></script>
 </body>
 </html>
