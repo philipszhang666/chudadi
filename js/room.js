@@ -128,11 +128,21 @@ var Room = (function () {
       if (!state || state.phase !== 'playing') return -1;
       var t = state.turn;
       if (!isHost) return -1;                       // 只有房主跑 AI
+
       var r = roster.filter(function (x) { return x.seat === t; })[0];
-      if (!r) return -1;
-      if (r.isHost) return -1;                      // 房主自己是真人
-      if (r.online) return -1;                      // 在线的真人自己会出牌
-      return t;                                     // 掉线的真人 → 房主代打
+
+      // 座位上有「在线的真人」才轮到人类出牌，其余一律交给 AI 代打：
+      //   · 没有记录      → 座位没人（人数不够），电脑补位
+      //   · online=false  → 真人掉线了，房主代打
+      //
+      // 踩过两个坑，都写下来免得再犯：
+      //   坑1：原来是 `if (!r) return -1;` —— 空座位被当成「轮到人类」，
+      //        于是 2 人玩 3 人局时轮到空位就永远卡住。
+      //   坑2：修坑1 时写成 `r.online && !r.isHost` —— 这一下把房主自己
+      //        判成了电脑，房主那一步会被 AI 顶掉（真人还没点，牌就打出去了）。
+      //        房主当然也在名单里且 online，所以只需要看 online。
+      var onlineHuman = !!r && r.online;
+      return onlineHuman ? -1 : t;
     }
 
     function aiAlgo() {

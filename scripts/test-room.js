@@ -48,6 +48,17 @@ function ok(cond, label, detail) {
 }
 function section(t) { console.log('\n' + t); }
 
+/* ---------------- 异步结束屏障 ----------------
+   第 5 节和第 11 节都是异步的（房主的 AI 用 setTimeout 分片，得等它跑）。
+   这里踩过一个很坑的错：finish() 谁先到谁就 process.exit，于是【先结束的
+   那一节会把另一节还没跑的断言直接丢掉】——总数在 108/113 之间飘，
+   而失败数一直是 0，看上去「全过」。
+
+   现在每节开工前 asyncPending++，干完 asyncPending--，只有归零才汇总。 */
+var asyncPending = 0;
+function asyncStart() { asyncPending++; }
+function asyncDone() { asyncPending--; if (asyncPending <= 0) finish(); }
+
 /* ---------------- 假传输层 ----------------
    模拟 net.js 的对外形状：sendToSeat / broadcast / attach / detachSeat。
    房主发什么，就同步存进对应玩家的「收件箱」。 */
@@ -70,14 +81,18 @@ function makeFakeNet() {
   };
 }
 
-/* ---------------- 搭一桌 4 人 ----------------
-   房主（seat 0）持权威 state，seat 1~3 是客户端。
-   客户端只拿到发来的视图，用它去算合法出牌（和真实界面一样）。 */
+/* ---------------- 搭一桌 ----------------
+   房主（seat 0）持权威 state，其余座位是客户端。
+   config.humans 指定「实际有多少个真人」：
+     · 人不够时剩下的座位【没有 roster 记录】—— 这正是「电脑补位」的前提，
+       也是线上出事故的那条路径（2 个真人玩 3 人局时，座位 2 是空的）。
+     · 不传就默认坐满。 */
 function setupGame(config) {
   var net = makeFakeNet();
   var views = {};          // seat -> 最新视图
   var hostRoom = null;
   var rejections = {};     // seat -> [拒绝原因]
+  var humans = (config.humans === undefined) ? config.playerCount : config.humans;
 
   var room = Room.create({
     net: net,
@@ -103,14 +118,10 @@ function setupGame(config) {
   room.startHost({ name: '房主', config: config });
   hostRoom = room;
 
-  // 之前没 attach 的座位现在补上，让 broadcast 能找到 1~3
-  for (var s = 1; s < config.playerCount; s++) {
-    net.attach(s, { __seat: s });
-  }
-
-  // 模拟三个客户端加入（走真实的消息路径）
+  // 只有前 humans 个座位有真人；其余的座位留空（= 交给电脑）
   var conns = {};
-  for (var s2 = 1; s2 < config.playerCount; s2++) {
+  for (var s2 = 1; s2 < humans; s2++) {
+    net.attach(s2, { __seat: s2 });
     var conn = { __seat: undefined, close: function () {} };
     conns[s2] = conn;
     room.onData({ type: P.C2H.HELLO, name: '玩家' + s2 }, conn);
@@ -361,12 +372,43 @@ section('4. 端到端：一局能从头打到结算');
     '结算明细里各家的剩余张数是公开的');
 })();
 
+/**
+ * 把一局打完：轮到真人就帮他走，轮到电脑位就等房主的 pump 自己推进。
+ * 返回 Promise，结束时把最终 state 交出来。
+ * 第 5 节（掉线代打）和第 11 节（空位补位）都用它。
+ */
+function playOutMixed(room, views) {
+  return new Promise(function (resolve) {
+    var st = room.state;
+    if (!st) return resolve(null);
+    var spin = 0;
+    function isHumanSeat(seat) {
+      return room.roster.some(function (r) { return r.seat === seat; });
+    }
+    function tick() {
+      if (st.phase === 'over') return resolve(st);
+      if (spin++ > 3000) return resolve(st);          // 超时也返回，交给断言去说明失败
+      var s = st.turn;
+      if (isHumanSeat(s)) {
+        var legal = Game.legalMoves(P.makeView(st, s));
+        var res = legal.length
+          ? room.applyAction(s, 'play', legal[0].cards.map(function (c) { return c.id; }))
+          : room.applyAction(s, 'pass');
+        if (!res.ok) return resolve(st);
+      }
+      setTimeout(tick, 3);          // 轮到电脑位时什么都不做，等 pump
+    }
+    tick();
+  });
+}
+
 /* ============================================================
    5. 掉线代打（异步：pump 用 setTimeout 分片，得等它跑）
    ============================================================ */
 section('5. 有人掉线时房主接手，牌局不会卡死');
 
-(function () {
+(async function () {
+  asyncStart();
   var g = setupGame({ playerCount: 4, landlord: false, nonA3ToLast: false });
   g.room.startGame();
   g.drain();
@@ -389,14 +431,14 @@ section('5. 有人掉线时房主接手，牌局不会卡死');
     g.drain();
   }
 
-  // 之后轮到 AI，pump 是异步的（setTimeout 分片），等它跑完
-  setTimeout(function () {
-    ok(st.phase === 'over' || st.turn === 0 || !st.players[st.turn].isHuman,
-      '掉线座位由房主代打，没有卡死（当前 phase=' + st.phase + ' turn=' + st.turn + '）');
-    ok(g.room.phase === 'over' || st.phase === 'playing', '房间阶段与实际牌局一致');
-
-    finish();
-  }, 1500);
+  // 之后轮到 AI，pump 是异步的（setTimeout 分片），等它跑完。
+  // 用 playOutMixed 走完整局，而不是只等一下看有没有动 —— 只等 1.5 秒
+  // 会时快时慢地误判，真正的判据是「这一局能不能打完」。
+  playOutMixed(g.room, g.views).then(function (final) {
+    ok(final.phase === 'over', '掉线座位由房主代打，整局能打完（phase=' + final.phase + '）');
+    ok(g.room.phase === 'over' || final.phase === 'playing', '房间阶段与实际牌局一致');
+    asyncDone();
+  });
 })();
 
 /* ============================================================
@@ -605,7 +647,116 @@ section('10. 视图字段完整性');
 })();
 
 /* ============================================================
-   8. 汇总（放最后：第 5 节是异步的）
+   11. 空座位由电脑补位 + 真人座位绝不能被电脑顶掉
+   ============================================================
+   线上出过的事故：2 个真人玩 3/4 人局，轮到没人坐的座位时房主死活
+   不出牌，牌局卡住。根因是 nextBotSeat() 里
+       var r = roster.filter(seat === t)[0];
+       if (!r) return -1;          // 空座位 → 被当成「轮到人类了」
+   roster 里只有真人，空座位根本没有记录，于是从没被当作电脑位。
+
+   修的时候又踩了第二个坑（这个测试就是为此加的）：
+       onlineHuman = r.online && !r.isHost;
+   这一下把【房主自己】判成了电脑 —— 真人还没点，牌就被 AI 打出去了，
+   而且房主那一手等于被代替。房主当然也在名单里且 online，
+   所以判据只能是 r.online，不能再加 !r.isHost。 */
+section('11. 空座位补位 + 真人座位不被电脑顶掉');
+
+(async function () {
+  asyncStart();
+  var g = setupGame({ playerCount: 3, landlord: false, nonA3ToLast: false, humans: 2 });
+  ok(g.room.roster.length === 2, 'A. 只坐了 2 个人（座位 0、1）',
+    JSON.stringify(g.room.roster.map(function (r) { return r.seat; })));
+
+  var r = g.room.startGame();
+  ok(r.ok, 'A. 人不够也能开局（空位交给电脑）', r.reason);
+
+  var st = g.room.state;
+  var botSeats = [];
+  st.players.forEach(function (p) {
+    var rec = g.room.roster.filter(function (x) { return x.seat === p.index; })[0];
+    if (!rec || !rec.online) botSeats.push(p.index);
+  });
+  ok(botSeats.length === st.players.length - 2,
+    'A. 有 ' + (st.players.length - 2) + ' 个座位该由电脑代打（实际 ' + JSON.stringify(botSeats) + '）');
+
+  g.drain();
+
+  // 先走到「轮到电脑位」的那一刻，记录 moveCount
+  var guard = 0;
+  while (guard++ < 300 && st.phase === 'playing') {
+    var s = st.turn;
+    if (botSeats.indexOf(s) >= 0) break;
+    var legal = Game.legalMoves(P.makeView(st, s));
+    var res = legal.length
+      ? g.room.applyAction(s, 'play', legal[0].cards.map(function (c) { return c.id; }))
+      : g.room.applyAction(s, 'pass');
+    g.drain();
+    if (!res.ok) break;
+  }
+  var atBotTurn = botSeats.indexOf(st.turn) >= 0 && st.phase === 'playing';
+  ok(atBotTurn, 'A. 牌局走到了「轮到空座位」的时刻（座位 ' + st.turn + '）');
+
+  var moveBefore = st.moveCount;
+  setTimeout(function () {
+    ok(st.moveCount > moveBefore,
+      'A. 房主替空座位自动出牌了（moveCount ' + moveBefore + ' → ' + st.moveCount + '）');
+
+    playOutMixed(g.room, g.views).then(function (final) {
+      ok(final.phase === 'over', 'A. 整局打完，没有卡死');
+      ok(final.result && final.result.detail.length === 3, 'A. 三家都进了结算');
+
+      /* ---- B. 满员局：真人座位（尤其是房主）绝不能被 AI 顶掉 ---- */
+      var g2 = setupGame({ playerCount: 4, landlord: false, nonA3ToLast: false });
+      ok(g2.room.roster.length === 4, 'B. 4 个座位都有人');
+      g2.room.startGame();
+      var st2 = g2.room.state;
+      ok(st2.players.length === 4, 'B. 满员局没有电脑位');
+      g2.drain();
+
+      // 一直推进到「轮到房主」为止（房主是座位 0）
+      var g3 = 0;
+      while (g3++ < 300 && st2.phase === 'playing' && st2.turn !== 0) {
+        var s2 = st2.turn;
+        var legal2 = Game.legalMoves(P.makeView(st2, s2));
+        var res2 = legal2.length
+          ? g2.room.applyAction(s2, 'play', legal2[0].cards.map(function (c) { return c.id; }))
+          : g2.room.applyAction(s2, 'pass');
+        g2.drain();
+        if (!res2.ok) break;
+      }
+      ok(st2.phase === 'over' || st2.turn === 0, 'B. 推进到了房主的回合');
+
+      if (st2.phase === 'playing' && st2.turn === 0) {
+        var hostHand = st2.players[0].hand.map(function (c) { return c.id; }).join(',');
+        var mc = st2.moveCount;
+        // 放着不管一段时间：房主不点，pump 就绝不能动
+        setTimeout(function () {
+          var hostHand2 = st2.players[0].hand.map(function (c) { return c.id; }).join(',');
+          ok(hostHand === hostHand2,
+            'B. 房主没点出牌，牌没有被 AI 顶掉（手牌 ' +
+            st2.players[0].hand.length + ' 张未变）',
+            'before=' + hostHand + ' after=' + hostHand2);
+          ok(st2.moveCount === mc,
+            'B. 轮到房主时 pump 不动（moveCount 保持 ' + mc + '）');
+          ok(st2.turn === 0, 'B. 仍然是房主的回合，等他自己出牌');
+
+          // 最后确认满员局也能整局打完
+          playOutMixed(g2.room, g2.views).then(function (final2) {
+            ok(final2.phase === 'over', 'B. 满员局整局打完');
+            asyncDone();
+          });
+        }, 700);
+      } else {
+        ok(true, 'B. （这一局在轮到房主前就结束了，跳过）');
+        asyncDone();
+      }
+    });
+  }, 900);
+})();
+
+/* ============================================================
+   汇总（放最后：第 5 节和第 11 节都是异步的）
    ============================================================ */
 function finish() {
   console.log('\n' + '='.repeat(52));
