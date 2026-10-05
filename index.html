@@ -149,6 +149,27 @@
         <button id="btnLobbyStart" class="btn primary" hidden>开始游戏</button>
         <button id="btnLobbyClose" class="btn ghost">返回牌桌</button>
       </div>
+
+      <!-- 连不上时的自救区：能看进度、能一键复制诊断发给别人 -->
+      <details class="lobby-diag">
+        <summary>连不上？看这里</summary>
+        <p class="lobby-note">
+          如果点了「加入」一直没反应，先看下面这段轨迹最后一行停在哪。
+          另外可以打开 <a id="diagLink" href="diag.html" target="_blank">联机自检</a>
+          跑一遍，它会检查信令、STUN、TURN 和局域网候选是否正常。
+        </p>
+        <p class="lobby-note">
+          最常见的两种连不上：<br>
+          ① <b>路由器开了 AP 隔离</b>（公共 Wi-Fi、酒店、部分 mesh 路由常见）——
+             同一个 Wi-Fi 下设备之间也被禁止互通。换个热点或换网络。<br>
+          ② <b>网络封了 UDP</b>（校园网 / 公司网）—— 已配 443/TCP 的 TURN 中继兜底，
+             但若仍失败，换成手机流量试。
+        </p>
+        <div class="dialog-actions">
+          <button id="btnCopyDiag" class="btn ghost small">复制诊断文本</button>
+        </div>
+        <pre id="netTraceBox" class="net-trace">（还没有联机记录）</pre>
+      </details>
     </div>
 
     <div class="set-list lobby-config">

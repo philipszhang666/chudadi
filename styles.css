@@ -841,3 +841,32 @@ html, body {
 
 .lobby-config { margin-top: 14px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .1); }
 .lobby-config .set-row { padding: 8px 0; }
+
+/* 联机自救区：进度轨迹 + 诊断 */
+.lobby-diag {
+  margin-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+  padding-top: 10px;
+}
+.lobby-diag > summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--gold);
+  padding: 4px 0;
+  user-select: none;
+}
+.lobby-diag a { color: var(--gold); }
+.net-trace {
+  margin: 8px 0 0;
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, .4);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #b9cfc4;
+  max-height: 190px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

@@ -23,17 +23,43 @@ var Net = (function () {
     ? require('./protocol.js')
     : ProtocolNS;
 
-  // 公共 STUN。局域网内其实用不上（主机候选直接就能连），
-  // 但手机走 4G / 跨网段时它是能不能连上的关键。
+  /* ---------------- ICE 服务器 ----------------
+     STUN 只负责「问出我的公网地址」，真正建连还得靠两边能互相打通。
+     碰上对称 NAT / 运营商级 NAT / 封锁 UDP 的网络，STUN 单独是打不通的，
+     必须有个 TURN 中继替双方转发。
+
+     这里用 Open Relay（metered.ca 提供的免费公共 TURN）：
+       官方页面 https://www.metered.ca/tools/openrelay/
+       · 443/TCP 那条最重要 —— 很多公司网 / 校园网封 UDP，只放 TCP 443
+       · 免费公共服务，长期稳定性没保证；哪天失效了，ICE 会自动退回
+         只走 STUN（不会报错，只是穿透力变弱），因此加着比不加好。
+       想换成自己的 TURN（更稳）：把下面 TURN_* 换成自己的凭据即可。
+
+     注意：TURN 只在直连打不通时才启用，能直连时流量不会绕道中继，
+     所以不会拖慢正常情况下的牌局。 */
+  var STUN = [
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:stun.l.google.com:19302' }
+  ];
+
+  var TURN_USER = 'openrelayproject';
+  var TURN_PASS = 'openrelayproject';
+  var TURN = [
+    { urls: 'turn:openrelay.metered.ca:443', username: TURN_USER, credential: TURN_PASS },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: TURN_USER, credential: TURN_PASS },
+    { urls: 'turn:openrelay.metered.ca:80', username: TURN_USER, credential: TURN_PASS },
+    { urls: 'turn:openrelay.metered.ca:3478?transport=udp', username: TURN_USER, credential: TURN_PASS }
+  ];
+
+  var ICE_SERVERS = STUN.concat(TURN);
+
   var PEER_OPTS = {
     debug: 1,
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:global.stun.twilio.com:3478' }
-      ]
-    }
+    config: { iceServers: ICE_SERVERS }
   };
+
+  /** 自检页要复用同一份配置，暴露出去免得两处不一致 */
+  function iceServers() { return ICE_SERVERS.slice(); }
 
   var role = null;          // 'host' | 'client' | null
   var peer = null;          // PeerJS Peer 实例
@@ -173,20 +199,36 @@ var Net = (function () {
 
     peer = new Peer(PEER_OPTS);
 
+    // 连接是个慢过程，中途得让界面有东西可看，否则用户只会觉得「点了没反应」
+    emit('phase', { phase: 'broker', text: '正在连信令服务器…' });
+
     peer.on('open', function () {
+      emit('phase', { phase: 'connecting', text: '正在和房主建立直连（打洞中）…' });
       var conn = peer.connect(P.peerIdFor(c), { reliable: true, serialization: 'json' });
 
       var settled = false;
+      /* 超时从 15s 放到 45s：手机 4G 上要等 broker + 收集候选 +
+         打通 NAT，15 秒经常不够，之前那样会把「慢但能成」的连接误判成失败。
+         真正的死胡同（房间码不存在）会由 peer-unavailable 立刻报出来，
+         不用靠这个超时兜底，所以放大它是安全的。 */
       var timeout = setTimeout(function () {
         if (settled) return;
         settled = true;
         emit('error', { reason: 'timeout', code: c });
-      }, 15000);
+      }, 45000);
+
+      // 打洞给了候选就会触发，用它显示进度，让用户知道还在动
+      try {
+        conn.on('iceStateChanged', function (st) {
+          emit('phase', { phase: 'ice', text: '网络连接状态：' + st });
+        });
+      } catch (e) { /* 老版本 PeerJS 没这个事件，忽略 */ }
 
       conn.on('open', function () {
         settled = true;
         clearTimeout(timeout);
         hostConn = conn;
+        emit('phase', { phase: 'handshake', text: '已连上房主，正在入座…' });
         // 重连时把自己的原座位报上去，房主会尽量让回原位
         sendTo(conn, { type: P.C2H.HELLO, code: c, name: name || '', seat: wasRole === 'client' ? wasSeat : null });
         emit('ready', { code: c, seat: null, isHost: false, wasReconnect: wasRole === 'client' });
@@ -198,7 +240,10 @@ var Net = (function () {
         emit('disconn', conn);
         scheduleReconnect();
       });
-      conn.on('error', function (err) { emit('connerror', err, conn); });
+      conn.on('error', function (err) {
+        emit('phase', { phase: 'datachannel-error', text: '数据通道出错：' + ((err && err.type) || err) });
+        emit('connerror', err, conn);
+      });
     });
 
     peer.on('error', function (err) {
@@ -257,6 +302,7 @@ var Net = (function () {
     host: host, join: join, close: close, poke: poke,
     attach: attach, detachSeat: detachSeat,
     broadcast: broadcast, sendToSeat: sendToSeat, send: send,
+    iceServers: iceServers,
     getRole: function () { return role; },
     getCode: function () { return code; },
     getMySeat: function () { return mySeat; },

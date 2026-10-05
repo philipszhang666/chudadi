@@ -1460,6 +1460,42 @@
     }
   }
 
+  /* ---------------- 联机诊断轨迹 ----------------
+     联机出问题时最怕「点了没反应」却什么信息都没有。
+     这里把每一步都记下来，界面上能看到最新一条，
+     也能一键复制成文本发给别人（或发我）定位。 */
+  var netTrace = [];
+
+  function trace(text) {
+    var t = new Date();
+    var line = ('0' + t.getHours()).slice(-2) + ':'
+             + ('0' + t.getMinutes()).slice(-2) + ':'
+             + ('0' + t.getSeconds()).slice(-2) + '  ' + text;
+    netTrace.push(line);
+    if (netTrace.length > 200) netTrace.shift();
+    var box = $('netTraceBox');
+    if (box) box.textContent = netTrace.join('\n');
+    return line;
+  }
+
+  /** 诊断文本：环境 + 轨迹 + 当前 ICE 配置，方便直接复制发出去 */
+  function netDiagText() {
+    var lines = [];
+    lines.push('=== 锄大地 联机诊断 ===');
+    lines.push('时间: ' + new Date().toString());
+    lines.push('地址: ' + (window.location && window.location.href));
+    lines.push('UA: ' + navigator.userAgent);
+    lines.push('模式: ' + mode + '  我是房主: ' + netIsHost + '  座位: ' + netSeat + '  房间码: ' + (netCode || '-'));
+    lines.push('在线名单: ' + JSON.stringify(netRoster));
+    try {
+      lines.push('ICE 配置: ' + JSON.stringify(Net.iceServers ? Net.iceServers() : '(取不到)'));
+    } catch (e) { lines.push('ICE 配置: 读取失败'); }
+    lines.push('');
+    lines.push('--- 事件轨迹 ---');
+    lines.push(netTrace.length ? netTrace.join('\n') : '(无)');
+    return lines.join('\n');
+  }
+
   /** 联机：把房主发来的视图同步到界面上（房主自己也走这条路径）
       force = 真时跳过序号去重（欢迎消息里带的首帧视图要用） */
   function syncFromView(e, force) {
@@ -1628,12 +1664,16 @@
 
     Net.on('ready', function (e) {
       netCode = e.code;
+      trace('房主开房成功，房间码 ' + netCode + '（信令已连上）');
       room.startHost({ name: netNick(), config: netConfig() });
       renderLobby();
       setNetStatus('联机中 · 房间 ' + netCode + ' · 你是房主');
     });
     Net.on('data', function (msg, conn) { if (room) room.onData(msg, conn); });
-    Net.on('conn', function (conn) { if (room) room.onConn(conn); });
+    Net.on('conn', function (conn) {
+      trace('有玩家连进来了：' + (conn && conn.peer));
+      if (room) room.onConn(conn);
+    });
     Net.on('disconn', function (conn) { if (room) room.onDisconn(conn); });
     // PeerJS 报「和某个 peer 的连接出问题了」= 那个客户端掉线了。
     // 光靠 DataConnection 的 close 事件在手机上不一定触发，这条更可靠。
@@ -1644,9 +1684,14 @@
       renderLobby();
     });
     Net.on('error', function (e) {
+      trace('房主出错：' + JSON.stringify(e));
       showNetError(e);
     });
-    Net.on('signal-lost', function () { setNetStatus('信令连接中断，重连中…（已在房里的人不受影响）'); });
+    Net.on('phase', function (e) { trace('[房主] ' + e.text); setNetStatus(e.text); });
+    Net.on('signal-lost', function () {
+      trace('信令连接中断（已在房里的人不受影响）');
+      setNetStatus('信令连接中断，重连中…（已在房里的人不受影响）');
+    });
     Net.host();
   }
 
@@ -1655,16 +1700,18 @@
     var c = ProtocolNS.normalizeCode(rawCode);
     if (c.length < 4) { setTip('✗ 房间码是 4 位，例如 ABCD', 'err'); return; }
 
-    // 前 20 秒算「首次加入」，之后报错就按「重连时房主已走」来解释
+    // 前 45 秒算「首次加入」，之后报错就按「重连时房主已走」来解释
+    // （和 net.js 里那个 45s 的连接超时保持一致）
     var joining = true;
-    setTimeout(function () { joining = false; }, 20000);
+    setTimeout(function () { joining = false; }, 45000);
 
     mode = 'online';
     netIsHost = false;
     netCode = c;
     netRoster = [];
     lastViewSeq = -1;
-    setNetStatus('正在连房间 ' + c + ' …');
+    trace('开始加入房间 ' + c);
+    setNetStatus('正在加入房间 ' + c + ' …');
     showLobbyOverlay();
 
     room = Room.create({
@@ -1679,6 +1726,7 @@
           if (e.roster) netRoster = e.roster;
           applySettingsToUI();
           renderLobby();
+          trace('入座成功：我是 ' + (e.seat + 1) + ' 号位');
           setNetStatus('联机中 · 房间 ' + netCode + (netIsHost ? ' · 你是房主' : ''));
           // 局中重连时房主会在 WELCOME 之后立刻补发一份视图；这里如果
           // 房间已经有局面（重连场景），直接强刷一次，别被序号去重挡掉
@@ -1688,20 +1736,35 @@
         netEvent: function (msg) {
           if (msg.kind === 'reject') {
             netBusy = false;
+            trace('动作被房主拒绝：' + msg.reason);
             setSelInfo('✗ ' + msg.reason, 'err');
             sfx('error');
             updateSelection();
           }
         },
-        error: function (e) { showNetError(e); },
+        error: function (e) { trace('房间出错：' + JSON.stringify(e)); showNetError(e); },
         closed: function () { onNetClosed('房主离开了房间'); }
       }
     });
 
     Net.on('data', function (msg, conn) { if (room) room.onData(msg, conn); });
-    Net.on('disconn', function () { setNetStatus('和房主的连接断了，正在重连…'); });
-    Net.on('reconnecting', function (e) { setNetStatus('重连中…（第 ' + e.attempt + ' 次）'); });
+    Net.on('disconn', function () {
+      trace('和房主的连接断了');
+      setNetStatus('和房主的连接断了，正在重连…');
+    });
+    Net.on('reconnecting', function (e) {
+      trace('重连中（第 ' + e.attempt + ' 次）');
+      setNetStatus('重连中…（第 ' + e.attempt + ' 次）');
+    });
+    // 连接过程中的每一步都显示出来：用户能看见「在打洞」而不是「卡死了」
+    Net.on('phase', function (e) {
+      trace('[加入] ' + e.text);
+      setNetStatus(e.text);
+      var hint = $('lobbyHint');
+      if (hint && !netSeat && mode === 'online') hint.textContent = e.text;
+    });
     Net.on('error', function (e) {
+      trace('加入出错：' + JSON.stringify(e));
       // 重连途中报 not-found = 房主已经关掉页面了，别再无限重试
       if (e.reason === 'not-found') {
         onNetClosed(joining ? ('房间 ' + c + ' 不存在（房间码对不对？房主还在页面上吗？）')
@@ -1848,6 +1911,22 @@
       } else {
         setSelInfo(done ? '链接已复制' : '复制失败，请手动选中复制', done ? 'ok' : 'err');
       }
+    });
+
+    // 复制诊断文本：连不上时把它发给对方或我，就能看到卡在哪一步
+    if ($('btnCopyDiag')) $('btnCopyDiag').addEventListener('click', function () {
+      var text = netDiagText();
+      var box = $('netTraceBox');
+      if (box) box.textContent = netTrace.join('\n') || '（无）';
+      var btn = $('btnCopyDiag');
+      var fallback = function () {
+        if (btn) btn.textContent = '复制失败，已显示在下方，请长按选中';
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () {
+          if (btn) btn.textContent = '已复制 ✓ 直接粘贴发送即可';
+        }, fallback);
+      } else { fallback(); }
     });
 
     // 顶部「联机」按钮 + 开始界面里的入口，都只是打开联机浮层

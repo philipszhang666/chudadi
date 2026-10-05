@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>锄大地 · 联机自检</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    background: #071a12; color: #eef4f0; line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { font-size: 12px; color: #9fb8ac; margin: 0 0 16px; }
+  .row {
+    display: grid; grid-template-columns: 22px 1fr; gap: 10px;
+    padding: 9px 11px; border-radius: 9px; margin-bottom: 7px;
+    background: rgba(255,255,255,.05); font-size: 13px;
+  }
+  .row .mark { font-weight: 700; text-align: center; }
+  .row.ok   .mark { color: #47c07a; }
+  .row.bad  .mark { color: #e05b5b; }
+  .row.warn .mark { color: #e8c37a; }
+  .row.run  .mark { color: #9fb8ac; }
+  .row .detail { display: block; font-size: 11px; color: #9fb8ac; margin-top: 2px; word-break: break-all; }
+  .row.bad .detail { color: #f0a0a0; }
+  h2 { font-size: 14px; margin: 18px 0 8px; color: #e8c37a; }
+  button {
+    width: 100%; padding: 12px; font-size: 15px; font-weight: 600;
+    border: 0; border-radius: 11px; background: #2f8f5e; color: #fff;
+    margin-bottom: 8px; cursor: pointer;
+  }
+  button:disabled { opacity: .5; }
+  button.ghost { background: rgba(255,255,255,.1); font-weight: 400; }
+  #log {
+    font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+    background: rgba(0,0,0,.4); border-radius: 9px; padding: 10px;
+    max-height: 240px; overflow: auto; white-space: pre-wrap;
+    word-break: break-all; color: #b9cfc4;
+  }
+  .verdict {
+    padding: 12px; border-radius: 11px; font-size: 13px; margin: 12px 0;
+    background: rgba(232,195,122,.12); border: 1px solid rgba(232,195,122,.3);
+  }
+  .verdict.bad { background: rgba(224,91,91,.12); border-color: rgba(224,91,91,.35); }
+  .verdict.ok  { background: rgba(71,192,122,.12); border-color: rgba(71,192,122,.35); }
+</style>
+</head>
+<body>
+
+<h1>联机自检</h1>
+<p class="sub">这个页面只做体检，不连牌局。跑完把结果截图发我即可。</p>
+
+<div id="summary" class="verdict" hidden></div>
+
+<button id="run">开始自检</button>
+<button id="copy" class="ghost">复制诊断文本</button>
+
+<h2>检查项</h2>
+<div id="checks"></div>
+
+<h2>原始日志</h2>
+<div id="log">点上面的按钮开始…</div>
+
+<!-- 复用游戏自己的协议与网络层：这样自检用的 ICE 配置
+     和真正打牌时是同一份，不会出现「自检通过但游戏连不上」的假象 -->
+<script src="js/protocol.js"></script>
+<script src="js/net.js"></script>
+<script>
+'use strict';
+
+var CHECKS = [
+  { id: 'proto',   name: '安全上下文（HTTPS）' },
+  { id: 'peerjs',  name: 'PeerJS 脚本已加载' },
+  { id: 'broker',  name: '信令服务器可达（PeerJS 公共 broker）' },
+  { id: 'stun',    name: 'STUN 可达（能问出自己的公网地址）' },
+  { id: 'relay',   name: 'TURN 中继可用（对称 NAT 下靠它）' },
+  { id: 'localIp', name: '能拿到本机局域网地址' },
+  { id: 'mdns',    name: '局域网候选没有被 mDNS 混淆' }
+];
+
+var results = {};
+var logLines = [];
+
+function el(id) { return document.getElementById(id); }
+
+function log(s) {
+  var t = new Date().toISOString().slice(11, 23);
+  logLines.push(t + '  ' + s);
+  el('log').textContent = logLines.join('\n');
+  el('log').scrollTop = el('log').scrollHeight;
+}
+
+function render() {
+  var box = el('checks');
+  box.innerHTML = '';
+  CHECKS.forEach(function (c) {
+    var r = results[c.id] || { state: 'wait', detail: '' };
+    var mark = { ok: '✓', bad: '✗', warn: '!', run: '…', wait: '·' }[r.state] || '·';
+    var row = document.createElement('div');
+    row.className = 'row ' + r.state;
+    var m = document.createElement('span');
+    m.className = 'mark';
+    m.textContent = mark;
+    var body = document.createElement('span');
+    body.textContent = c.name;
+    if (r.detail) {
+      var d = document.createElement('span');
+      d.className = 'detail';
+      d.textContent = r.detail;
+      body.appendChild(d);
+    }
+    row.appendChild(m);
+    row.appendChild(body);
+    box.appendChild(row);
+  });
+}
+
+function set(id, state, detail) {
+  results[id] = { state: state, detail: detail || '' };
+  log('[' + state + '] ' + id + (detail ? ' — ' + detail : ''));
+  render();
+}
+
+/* ---------------- 1. 安全上下文 ---------------- */
+function checkProto() {
+  var secure = (location.protocol === 'https:') ||
+               (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+  set('proto', secure ? 'ok' : 'warn',
+    location.protocol + '//' + location.host + (secure ? '（WebRTC 可用）' : '（WebRTC 仍可用，但建议 HTTPS）'));
+  return secure;
+}
+
+/* ---------------- 2. PeerJS ---------------- */
+function checkPeerjs() {
+  if (typeof Peer === 'undefined') {
+    set('peerjs', 'bad', 'vendor/peerjs.min.js 没加载上');
+    return false;
+  }
+  set('peerjs', 'ok', '全局 Peer 可用');
+  return true;
+}
+
+/**
+ * 建一个临时 Peer，收集 ICE 候选：
+ *   · 能连上 broker 才会收到 OPEN
+ *   · 收到候选才说明 STUN 通了、或至少局域网候选存在
+ * 这一步是整个联机的缩影：连不上这里，牌局必然连不上。
+ */
+function gatherIce(timeoutMs) {
+  return new Promise(function (resolve) {
+    var cands = [];
+    var peer = null;
+    var done = false;
+    var t0 = Date.now();
+
+    function finish(reason) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { peer && peer.destroy(); } catch (e) {}
+      resolve({ cands: cands, reason: reason, ms: Date.now() - t0 });
+    }
+
+    var timer = setTimeout(function () { finish('timeout'); }, timeoutMs);
+
+    // 用游戏自己那份 ICE 配置（含 STUN + TURN），保证自检和实战一致
+    var iceServers;
+    try {
+      iceServers = (typeof Net !== 'undefined' && Net.iceServers)
+        ? Net.iceServers()
+        : [{ urls: 'stun:stun.l.google.com:19302' }];
+    } catch (e) {
+      iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+    }
+    log('将使用 ' + iceServers.length + ' 个 ICE 服务器：');
+    iceServers.forEach(function (s) {
+      log('   ' + (s.urls || s.url) + (s.username ? '  (带凭据)' : ''));
+    });
+
+    try {
+      peer = new Peer({ debug: 1, config: { iceServers: iceServers } });
+    } catch (e) {
+      set('broker', 'bad', '创建 Peer 抛异常：' + e.message);
+      finish('throw');
+      return;
+    }
+
+    // 挂到内部 RTCPeerConnection 上偷看候选（PeerJS 不直接暴露这些）
+    var origRTC = window.RTCPeerConnection;
+    window.RTCPeerConnection = function (cfg) {
+      log('RTCPeerConnection 配置的 iceServers: ' +
+          JSON.stringify((cfg && cfg.iceServers) || []));
+      var pc = new origRTC(cfg);
+      pc.addEventListener('icecandidate', function (ev) {
+        if (!ev.candidate) { log('候选收集结束（null 候选）'); return; }
+        var c = ev.candidate.candidate;
+        cands.push(c);
+        log('候选: ' + c);
+      });
+      return pc;
+    };
+    window.RTCPeerConnection.prototype = origRTC.prototype;
+
+    peer.on('open', function (id) {
+      log('已连上 broker，我的临时 id = ' + id);
+      set('broker', 'ok', '收到 OPEN，id=' + id.slice(0, 14) + '…');
+      // broker 通了，再等候选（最多再等 timeoutMs）
+      setTimeout(function () {
+        window.RTCPeerConnection = origRTC;
+        finish('after-open');
+      }, timeoutMs);
+    });
+
+    peer.on('error', function (err) {
+      log('Peer 报错: ' + (err && (err.type || err.message)));
+      window.RTCPeerConnection = origRTC;
+      if (!results.broker || results.broker.state !== 'ok') {
+        set('broker', 'bad', '连不上信令服务器：' + ((err && err.type) || err));
+      }
+      finish('error');
+    });
+  });
+}
+
+/* ---------------- 3~6. 分析候选 ---------------- */
+function analyseIce(res) {
+  var cands = res.cands;
+  log('共收集到 ' + cands.length + ' 条候选（结束原因 ' + res.reason + '）');
+
+  if (!results.broker || results.broker.state !== 'ok') {
+    set('broker', 'bad', '没能连上信令服务器 —— 牌局一定连不上');
+  }
+
+  // STUN：出现 srflx（服务器反射）候选就说明 STUN 通了
+  var srflx = cands.filter(function (c) { return / typ srflx /.test(c); });
+  var host = cands.filter(function (c) { return / typ host /.test(c); });
+  var relay = cands.filter(function (c) { return / typ relay /.test(c); });
+
+  if (srflx.length) {
+    var addr = /(\d+\.\d+\.\d+\.\d+):(\d+)/.exec(srflx[0]);
+    set('stun', 'ok', '有 srflx 候选' + (addr ? ('：公网地址 ' + addr[1]) : ''));
+  } else {
+    set('stun', 'bad', '没拿到 srflx 候选 —— STUN 被防火墙或网络挡住了。'
+      + '这会让两台设备在不同网络时无法互通');
+  }
+
+  // 局域网地址：host 候选
+  var hostAddr = null;
+  for (var i = 0; i < host.length; i++) {
+    var m = /(\d+\.\d+\.\d+\.\d+):\d+/.exec(host[i]);
+    if (m && !/^127\./.test(m[1])) { hostAddr = m[1]; break; }
+  }
+  if (host.length) {
+    set('localIp', 'ok', hostAddr ? ('本机局域网地址 ' + hostAddr) : '有 host 候选（地址形如 .local 主机名）');
+  } else {
+    set('localIp', 'warn', '没有任何 host 候选');
+  }
+
+  // mDNS 混淆：局域网候选被换成 .local 名字，别的设备解析不了，
+  // 这正是「同一个 Wi-Fi 也连不上」的经典原因
+  var mdns = cands.filter(function (c) { return /\.local/.test(c); });
+  if (mdns.length && !hostAddr) {
+    set('mdns', 'warn',
+      '局域网地址被浏览器换成了 .local 主机名（' + mdns.length + ' 条）。'
+      + '同一个 Wi-Fi 下的设备之间可能解析不了这个名字，'
+      + '于是只能靠 STUN 绕公网 —— 而路由器如果开了「AP 隔离」，两条路都不通');
+  } else if (hostAddr) {
+    set('mdns', 'ok', '有真实的局域网 IP 候选，同网段直连没问题');
+  } else {
+    set('mdns', 'warn', '没有可用的局域网候选');
+  }
+
+  // relay 候选 = 有 TURN 中继可用。这是对称 NAT / 封 UDP 网络下的唯一退路。
+  if (relay.length) {
+    var ra = /(\d+\.\d+\.\d+\.\d+):(\d+)/.exec(relay[0]);
+    set('relay', 'ok', '有 relay 候选' + (ra ? ('：中继 ' + ra[1]) : '') + '，打不通直连时会自动走中继');
+  } else {
+    set('relay', 'warn',
+      '没拿到 relay 候选。可能原因：TURN 服务器不可达、凭据失效，或本机网络封了到 TURN 的 UDP/TCP。'
+      + '同一个 Wi-Fi 下通常还能直连，但跨网络时若双方都是严格 NAT 就会失败');
+  }
+}
+
+/* ---------------- 汇总 ---------------- */
+function summarise() {
+  var bad = CHECKS.filter(function (c) {
+    return results[c.id] && results[c.id].state === 'bad';
+  });
+  var warn = CHECKS.filter(function (c) {
+    return results[c.id] && results[c.id].state === 'warn';
+  });
+  var box = el('summary');
+  box.hidden = false;
+
+  if (bad.length === 0 && warn.length === 0) {
+    box.className = 'verdict ok';
+    box.textContent = '全项通过。如果牌局还是连不上，问题在别处，把下面的日志发我。';
+  } else if (bad.length) {
+    box.className = 'verdict bad';
+    box.textContent = '有 ' + bad.length + ' 项失败：'
+      + bad.map(function (c) { return c.name; }).join('、')
+      + '。这就是连不上的原因，把这一页截图发我。';
+  } else {
+    box.className = 'verdict';
+    box.textContent = '基本可用，但有 ' + warn.length + ' 项警告：'
+      + warn.map(function (c) { return c.name; }).join('、')
+      + '。同一个 Wi-Fi 下多半能连，跨网络可能失败。';
+  }
+}
+
+/* ---------------- 主流程 ---------------- */
+async function run() {
+  el('run').disabled = true;
+  results = {};
+  logLines = [];
+  render();
+  el('summary').hidden = true;
+
+  log('=== 自检开始 ===');
+  log('UA: ' + navigator.userAgent);
+  log('地址: ' + location.href);
+
+  checkProto();
+  if (!checkPeerjs()) { summarise(); el('run').disabled = false; return; }
+
+  set('broker', 'run', '正在连信令服务器…');
+  set('stun', 'run', '正在收集网络候选…');
+  set('relay', 'run', '正在探测 TURN 中继…');
+  set('localIp', 'run', '');
+  set('mdns', 'run', '');
+
+  var res = await gatherIce(8000);
+  analyseIce(res);
+
+  summarise();
+  log('=== 自检结束 ===');
+  el('run').disabled = false;
+}
+
+el('run').addEventListener('click', run);
+
+el('copy').addEventListener('click', function () {
+  var text = logLines.join('\n') + '\n\n--- 结论 ---\n' +
+    CHECKS.map(function (c) {
+      var r = results[c.id] || { state: 'wait', detail: '' };
+      return c.name + ': ' + r.state + (r.detail ? (' — ' + r.detail) : '');
+    }).join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(
+      function () { el('copy').textContent = '已复制，发我即可'; },
+      function () { el('copy').textContent = '复制失败，请手动长按选中'; });
+  } else {
+    el('copy').textContent = '请手动长按日志区域选中复制';
+  }
+});
+
+render();
+</script>
+</body>
+</html>
