@@ -526,12 +526,14 @@
       // 不能出的牌不做任何标注（只有 dimUnplayable 打开时由容器上的类来压暗）
       if (myTurn && !playable) e.classList.add('unplayable');
       if (selected[c.id]) e.classList.add('sel');
-      // 单击 = 切换这一张；按住左键划过一串 = 成批选 / 成批取消（见下方选牌实现）
+      // 单击 = 切换这一张；按住（鼠标左键 / 手指）划过一串 = 成批选 / 成批取消
+      e.__card = c;   // 触摸划选时用 elementFromPoint 找回这张牌对应的对象
       e.addEventListener('mousedown', function (ev) { onCardMouseDown(ev, c, e); });
       e.addEventListener('mouseenter', function () { onCardDragOver(c, e); });
       e.addEventListener('mousemove', function () { onCardDragOver(c, e); });
       e.addEventListener('mouseup', endCardDrag);
       e.addEventListener('click', function (ev) { onCardClick(ev, c); });
+      e.addEventListener('touchstart', function (ev) { onCardTouchStart(ev, c, e); }, { passive: false });
       box.appendChild(e);
     });
 
@@ -712,6 +714,32 @@
     dragging = false;
     lastDragId = null;
     updateSelection();
+  }
+
+  /** 触摸版「按下」：等价于鼠标 mousedown —— 开始一次划选 */
+  function onCardTouchStart(ev, card, cardNode) {
+    if (!state || state.phase !== 'playing') return;
+    if (!ev.touches || ev.touches.length !== 1) return;   // 多指（缩放）忽略
+    ev.preventDefault();                                  // 阻止滚动/缩放，也不再补发鼠标事件
+    suppressClick = true;
+    dragging = true;
+    lastDragId = null;
+    // 起始牌的状态决定这一趟是「批量选中」还是「批量取消」
+    dragMode = selected[card.id] ? 'deselect' : 'select';
+    selectByDrag(card, cardNode);
+  }
+
+  /**
+   * 触摸版「划过」：touchmove 的 target 永远是起手那张牌，
+   * 所以用 elementFromPoint 找出指头当前压在哪张牌上，再处理它。
+   */
+  function onDocTouchMove(ev) {
+    if (!dragging || !ev.touches || !ev.touches.length) return;
+    ev.preventDefault();
+    var t = ev.touches[0];
+    var node = document.elementFromPoint(t.clientX, t.clientY);
+    var cardNode = (node && node.closest) ? node.closest('.hand .card') : null;
+    if (cardNode && cardNode.__card) onCardDragOver(cardNode.__card, cardNode);
   }
 
   /**
@@ -1233,6 +1261,10 @@
   // 拖动选牌松手时：可能已经划到手牌外面了，所以全局兜一下
   document.addEventListener('mouseup', endCardDrag);
   document.addEventListener('mouseleave', endCardDrag);
+  // 触摸划选：touchmove 里要 preventDefault（阻止滚动/缩放），必须显式 passive:false
+  document.addEventListener('touchmove', onDocTouchMove, { passive: false });
+  document.addEventListener('touchend', endCardDrag);
+  document.addEventListener('touchcancel', endCardDrag);
 
   /**
    * 关掉浮层。结算浮层关掉后不直接开新局，

@@ -387,6 +387,7 @@ html, body {
   min-height: calc(var(--card-h) + 18px);
   padding: 6px 10px 0;
   gap: 0;
+  touch-action: none;      /* 手牌区自己处理触摸（划选），不让浏览器滚动/缩放抢走 */
 }
 .hand .card {
   margin-left: -22px;
