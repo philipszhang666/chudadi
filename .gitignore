@@ -2,3 +2,4 @@
 .agent/
 node_modules/
 *.log
+.git-ca-bundle.pem

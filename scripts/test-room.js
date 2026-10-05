@@ -28,6 +28,7 @@ if (!require('fs').existsSync(path.join(DIR, 'ai_v1.js'))) {
 }
 
 var P = require(path.join(DIR, 'protocol.js'));
+var CD = require(path.join(DIR, 'cards.js'));
 var Game = require(path.join(DIR, 'game.js'));
 require(path.join(DIR, 'determinize.js'));
 require(path.join(DIR, 'endgame.js'));
@@ -220,51 +221,91 @@ section('3. 权威校验：客户端伪造动作会被房主拒绝');
   g.drain();
 
   var st = g.room.state;
-  var leader = st.turn;                       // 持 ♦4 的人先出
+  var leader = st.turn;                       // 持 ♦4 的人先出（座位随机！）
+  var snapshot = function () {
+    return JSON.stringify(st.players.map(function (p) {
+      return p.hand.map(function (c) { return c.id; });
+    }));
+  };
+  var before = snapshot();
+
+  /** 找一张「确定不在某家手里」的牌。
+      不能写死 '3S' —— 它可能正好就发在那个人手上，
+      那这条就不是「出别人的牌」而是合法出牌了，断言会变得没意义。 */
+  function cardNotIn(hand) {
+    var have = {};
+    hand.forEach(function (c) { have[c.id] = 1; });
+    for (var i = 0; i < CD.ALL_CARDS.length; i++) {
+      if (!have[CD.ALL_CARDS[i].id]) return CD.ALL_CARDS[i].id;
+    }
+    return null;
+  }
+
+  /* 这一节踩过三个坑，注释留着免得再犯：
+
+     坑1：持 ♦4 的人坐哪是随机的。原来写成 if (leader === 0) 分两条路测，
+          每次只跑一半断言，总数在 99/101 之间跳。现在两条入口都无条件跑。
+
+     坑2：同一局里连发几个非法动作，拒绝记录是累积的 —— 一条断言只看
+          「数组长度 === 1」，就会被前面那条操作产生的拒绝顶掉而随机失败。
+
+     坑3（坑2 的变体）：房主入口的拒绝也可能落到座位 1（当轮到座位 1 出牌时
+          就是「还没轮到你」）。所以「谁收到过拒绝」不能作为断言依据，
+          只能看「这次操作有没有让那个人的拒绝数 +1」。
+
+     另外：座位 0 是房主（UI 走 room.applyAction），座位 1~3 是客户端
+     （UI 走 net.send → room.onData）。所以「客户端入口」必须在 1~3 里挑。 */
+  function rejectDelta(fn, seat) {
+    var b = (g.rejections[seat] || []).length;
+    fn();
+    g.drain();
+    return (g.rejections[seat] || []).length - b;
+  }
+
+  // (a) 客户端入口：非当前出牌者发动作 —— 必须被拒，牌局不许变
   var notLeader = (leader + 1) % 4;
-  var before = JSON.stringify(st.players.map(function (p) { return p.hand.map(function (c) { return c.id; }); }));
-
-  // (a) 不是你的回合
-  g.room.onData({ type: P.C2H.ACTION, action: 'play', cards: [st.players[notLeader].hand[0].id] }, g.conns[notLeader]);
-  g.drain();                                  // 立刻收，否则收件箱会被后面的 drain 清掉
-  var after1 = JSON.stringify(st.players.map(function (p) { return p.hand.map(function (c) { return c.id; }); }));
-  ok(before === after1, '非当前出牌者的动作没有改坏牌局');
-  ok(g.rejections[notLeader] && g.rejections[notLeader].length === 1,
-    '非当前出牌者收到了拒绝', JSON.stringify(g.rejections[notLeader]));
-
-  // (b) 当前出牌者出了「不在自己手里的牌」
-  var leaderSeat = leader;
-  if (leaderSeat === 0) {
-    // 房主自己出手，走 applyAction
-    var wrong = g.room.applyAction(0, 'play', ['3S']);
-    ok(!wrong.ok, '房主自己出不在手里的牌也被拒', wrong.reason);
+  if (notLeader === 0) {
+    // 用「房主入口」覆盖同一个语义：房主现在不是该出牌的人
+    var ra = g.room.applyAction(0, 'play', [st.players[0].hand[0].id]);
+    ok(!ra.ok, '非当前出牌者（房主）的动作被拒', ra.reason);
   } else {
-    g.room.onData({ type: P.C2H.ACTION, action: 'play', cards: ['3S'] }, g.conns[leaderSeat]);
-    g.drain();
-    var after2 = JSON.stringify(st.players.map(function (p) { return p.hand.map(function (c) { return c.id; }); }));
-    ok(before === after2, '出不在手里的牌没有改坏牌局');
-    ok(g.rejections[leaderSeat] && g.rejections[leaderSeat].length === 1,
-      '出不在手里的牌被拒', JSON.stringify(g.rejections[leaderSeat]));
+    var dA = rejectDelta(function () {
+      g.room.onData({ type: P.C2H.ACTION, action: 'play', cards: [st.players[notLeader].hand[0].id] }, g.conns[notLeader]);
+    }, notLeader);
+    ok(dA === 1, '非当前出牌者收到了拒绝', 'delta=' + dA + ' ' + JSON.stringify(g.rejections[notLeader]));
   }
+  ok(before === snapshot(), '非当前出牌者的动作没有改坏牌局');
 
-  // (c) 第一手不带 ♦4
-  if (leaderSeat === 0) {
-    var noFour = g.room.state.players[0].hand.filter(function (c) { return c.id !== '4D'; });
-    var r3 = g.room.applyAction(0, 'play', [noFour[noFour.length - 1].id]);
-    ok(!r3.ok, '首手不带 ♦4 被拒', r3.reason);
+  // (b) 房主入口：房主出一张「不在自己手里的牌」—— 必须被拒
+  var hostWrong = g.room.applyAction(0, 'play', [cardNotIn(st.players[0].hand)]);
+  ok(!hostWrong.ok, '房主自己出不在手里的牌也被拒', hostWrong.reason);
+  ok(before === snapshot(), '房主非法出牌没有改坏牌局');
+
+  // (c) 客户端入口：出一张确定不在自己手里的牌
+  //     发送者固定在 1 号（客户端），理由见上：0 号是房主，不走这条入口
+  var dB = rejectDelta(function () {
+    g.room.onData({ type: P.C2H.ACTION, action: 'play', cards: [cardNotIn(st.players[1].hand)] }, g.conns[1]);
+  }, 1);
+  ok(dB === 1, '客户端出不在手里的牌被拒', 'delta=' + dB + ' ' + JSON.stringify(g.rejections[1]));
+  ok(before === snapshot(), '客户端出不在手里的牌没有改坏牌局');
+
+  // (d) 第一手不带 ♦4 —— 由真正持 ♦4 的那位来发，两个入口都覆盖
+  if (leader !== 0) {
+    var hand = st.players[leader].hand.filter(function (c) { return c.id !== '4D'; });
+    var dD = rejectDelta(function () {
+      g.room.onData({ type: P.C2H.ACTION, action: 'play', cards: [hand[hand.length - 1].id] }, g.conns[leader]);
+    }, leader);
+    ok(dD === 1, '首手不带 ♦4 被拒（客户端入口）',
+      'delta=' + dD + ' ' + JSON.stringify(g.rejections[leader]));
   } else {
-    var hand = st.players[leaderSeat].hand.filter(function (c) { return c.id !== '4D'; });
-    g.room.onData({ type: P.C2H.ACTION, action: 'play', cards: [hand[hand.length - 1].id] }, g.conns[leaderSeat]);
-    g.drain();
-    var after3 = JSON.stringify(st.players.map(function (p) { return p.hand.map(function (c) { return c.id; }); }));
-    ok(before === after3, '首手不带 ♦4 没有改坏牌局');
-    ok(g.rejections[leaderSeat] && g.rejections[leaderSeat].length === 2, '首手不带 ♦4 被拒',
-      JSON.stringify(g.rejections[leaderSeat]));
+    var noFour = st.players[0].hand.filter(function (c) { return c.id !== '4D'; });
+    var r4 = g.room.applyAction(0, 'play', [noFour[noFour.length - 1].id]);
+    ok(!r4.ok, '首手不带 ♦4 被拒（房主入口）', r4.reason);
   }
+  ok(before === snapshot(), '首手不带 ♦4 没有改坏牌局');
 
-  // 领导出牌者肯定拿 ♦4，前面断言过
   ok(st.players[leader].hand.some(function (c) { return c.id === '4D'; }),
-    '先出的人确实持 ♦4（前面的拒绝理由才成立）');
+    '先出的人确实持 ♦4（前面几条拒绝理由才成立）');
 })();
 
 /* ============================================================
@@ -407,8 +448,30 @@ section('7. 房间码');
     seen[c] = (seen[c] || 0) + 1;
   }
   ok(bad === 0, '400 个房间码都是 4 位且不含易混字符');
-  ok(Object.keys(seen).length > 380,
-    '房间码随机性够（400 次里 ' + Object.keys(seen).length + ' 个不重复）');
+
+  /* 下面这条原本写的是「400 次里不重复的要 > 380」——那是个概率断言，
+     会随运行抖动（实际跑到过 99/101 两次数不同）。改成确定性的均匀性检查：
+     31 个字符在每一位上都该出现，而且频次不能离谱。 */
+  var N = 31000;                      // 每个字符平均出现 1000 次
+  var perPos = [{}, {}, {}, {}];
+  for (var k = 0; k < N; k++) {
+    var s = P.makeCode();
+    for (var pi = 0; pi < 4; pi++) perPos[pi][s[pi]] = (perPos[pi][s[pi]] || 0) + 1;
+  }
+  var alphabet = P.CODE_ALPHABET;
+  var uniformProblems = [];
+  perPos.forEach(function (counts, pi) {
+    var seen = Object.keys(counts).length;
+    if (seen !== alphabet.length) uniformProblems.push('第 ' + pi + ' 位只出现了 ' + seen + ' 种字符');
+    Object.keys(counts).forEach(function (ch) {
+      var c = counts[ch];
+      // 期望 1000 次，允许 0.5x~1.8x 的波动（正态下这是极宽松的界）
+      if (c < 500 || c > 1800) uniformProblems.push('第 ' + pi + ' 位字符 ' + ch + ' 出现 ' + c + ' 次');
+    });
+  });
+  ok(uniformProblems.length === 0,
+    N + ' 次采样：4 位字符分布均匀（每位 ' + alphabet.length + ' 种字符都出现且频次正常）',
+    uniformProblems.slice(0, 3).join('; '));
 
   ok(P.normalizeCode('abcd') === 'ABCD', '小写房间码会转成大写');
   ok(P.normalizeCode(' a b c d ') === 'ABCD', '房间码里的空格会被忽略');

@@ -1709,6 +1709,10 @@
         return;
       }
       showNetError(e);
+      // 打不通这类问题，给一句能照着做的建议，比只报错有用
+      if (e.reason === 'timeout' || e.reason === 'reconnect-failed') {
+        setSelInfo(hintForFailedLink(), 'err');
+      }
       if (e.reason === 'reconnect-failed') onNetClosed('重连失败，请重新加入');
     });
 
@@ -1739,7 +1743,7 @@
       'peerjs-missing': '联机脚本没加载上',
       'bad-code': '房间码不合法',
       'not-found': '找不到这个房间',
-      'timeout': '连接超时（可能不在同一个网络 / 房主已关页面）',
+      'timeout': '连接超时（双方网络打不通，见下方提示 / 房主可能已关页面）',
       'unavailable-id': '房间码被占用了，重试一下',
       'reconnect-failed': '重连失败'
     };
@@ -1747,6 +1751,17 @@
     setTip('✗ ' + text, 'err');
     setNetStatus('✗ ' + text);
     sfx('error');
+  }
+
+  /** 等到确认连不上时，给一句能照着做的建议。
+      原理：双方各自连公共信令服务器完成牵线，之后靠 STUN 打通直连。
+      碰上严格的对称 NAT / 运营商级 NAT 时打不通，而我没配 TURN 中继，
+      这时候最省事的办法就是换到同一个 Wi-Fi（走局域网路径必通）。 */
+  function hintForFailedLink() {
+    return '连不上对方：可能两边网络打不通。'
+      + '试一下：① 两台设备连同一个 Wi-Fi（局域网路径必通）；'
+      + '② 或者让其中一方开手机热点、另一方连它的热点；'
+      + '③ 换一边的网络再试（比如把 Wi-Fi 换成流量）。';
   }
 
   /** 房间没了 / 被踢 / 房主跑了：退回单机，别把人卡在空牌桌上 */

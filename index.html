@@ -96,7 +96,7 @@
       <button id="btnStart" class="btn primary start-btn">开始游戏</button>
       <p class="start-record" id="startRecord">你 赢 0 局 · 输 0 局（共 0 局）</p>
       <p class="start-hint" id="startHint">点「开始游戏」发牌，持 ♦4 的人先出</p>
-      <button id="btnNetEntry" class="btn ghost net-entry">🌐 和朋友联机（同一网络即可）</button>
+      <button id="btnNetEntry" class="btn ghost net-entry">🌐 和朋友联机（异地也能玩）</button>
     </div>
   </div>
 
@@ -107,8 +107,9 @@
   <div class="dialog">
     <h2>和朋友联机</h2>
     <p class="lobby-lead">
-      不需要服务器：开房的那台设备就是「房主」，其他人直接连它。<br>
-      同一个 Wi-Fi、手机热点、甚至跨网络一般都能连上（走 WebRTC 直连）。
+      不需要服务器：开房的那台设备就是「房主」，其他人通过 WebRTC 直连它。<br>
+      <b>不在同一个网络也能玩</b>——各自的手机连一下公共信令服务器完成牵线，
+      之后牌局数据就在两台手机之间直接传。同一个 Wi-Fi 下只是更快一点。
     </p>
 
     <div class="lobby-name-row">
@@ -333,7 +334,7 @@
       <ul>
         <li>点顶栏或开始界面的 <b>🌐 联机</b>：一个人「开房」拿到 4 位房间码，其他人输房间码加入。</li>
         <li><b>不需要服务器</b>：开房的那台设备既是玩家也是「房主」，其他人通过 WebRTC 直连它。
-            同一个 Wi-Fi、手机热点、甚至两人在不同网络下一般都能连上。</li>
+            <b>异地也能玩</b>，不必在同一个 Wi-Fi 下。</li>
         <li>房主负责发牌、校验每个人的出牌、以及<b>替没坐满的座位打电脑</b>。</li>
         <li><b>看不见别人的牌</b>：服务端只把「你自己的手牌 + 公开信息」发给你。
             就算开浏览器的开发者工具，也只能看到自己那 13 张。</li>
