@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>锄大地 · 改版（3 最大）</title>
-<link rel="stylesheet" href="styles.css?v=11">
+<link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
 
@@ -22,6 +22,8 @@
 
     <div class="topbar-tools">
       <span class="tool-hint" id="setupSummary">4 人 · 普通</span>
+      <span class="net-status" id="netStatus" hidden></span>
+      <button id="btnNet" class="btn ghost">🌐 联机</button>
       <button id="btnSettings" class="btn ghost">⚙ 设置</button>
       <button id="btnNew" class="btn ghost"
               title="结束当前这局，回到开始界面（再点正中的「开始游戏」才发牌）">重新开局</button>
@@ -94,9 +96,74 @@
       <button id="btnStart" class="btn primary start-btn">开始游戏</button>
       <p class="start-record" id="startRecord">你 赢 0 局 · 输 0 局（共 0 局）</p>
       <p class="start-hint" id="startHint">点「开始游戏」发牌，持 ♦4 的人先出</p>
+      <button id="btnNetEntry" class="btn ghost net-entry">🌐 和朋友联机（同一网络即可）</button>
     </div>
   </div>
 
+</div>
+
+<!-- 联机浮层：开房 / 加入 / 候场 -->
+<div class="overlay" id="lobbyOverlay" hidden>
+  <div class="dialog">
+    <h2>和朋友联机</h2>
+    <p class="lobby-lead">
+      不需要服务器：开房的那台设备就是「房主」，其他人直接连它。<br>
+      同一个 Wi-Fi、手机热点、甚至跨网络一般都能连上（走 WebRTC 直连）。
+    </p>
+
+    <div class="lobby-name-row">
+      <span class="lobby-label">你的昵称</span>
+      <input id="nickInput" class="nick-input" maxlength="8" autocomplete="off"
+             spellcheck="false" placeholder="牌友">
+    </div>
+
+    <div class="lobby-cols">
+      <div class="lobby-col">
+        <h3>开一个房</h3>
+        <p class="lobby-note">你来当房主。房主也是玩家，不用额外挂一台设备。</p>
+        <button id="btnHost" class="btn primary">开房</button>
+      </div>
+      <div class="lobby-col">
+        <h3>加入房间</h3>
+        <p class="lobby-note">输入房主给你的 4 位房间码。</p>
+        <div class="lobby-join">
+          <input id="joinCode" class="code-input" maxlength="4" inputmode="latin"
+                 autocomplete="off" spellcheck="false" placeholder="ABCD">
+          <button id="btnJoin" class="btn">加入</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="lobby-room" id="lobbyRoom">
+      <div class="lobby-code-row">
+        <span class="lobby-label">房间码</span>
+        <strong id="lobbyCode">—</strong>
+        <button id="btnCopyLink" class="btn ghost small">复制邀请链接</button>
+        <button id="btnLeave" class="btn ghost small">离开房间</button>
+      </div>
+      <input id="lobbyLink" class="link-input" readonly hidden>
+      <p class="lobby-note" id="lobbyHint"></p>
+      <div class="lobby-players" id="lobbyPlayers"></div>
+      <div class="dialog-actions">
+        <button id="btnLobbyStart" class="btn primary" hidden>开始游戏</button>
+        <button id="btnLobbyClose" class="btn ghost">返回牌桌</button>
+      </div>
+    </div>
+
+    <div class="set-list lobby-config">
+      <div class="set-row">
+        <div class="set-label">
+          <b>游戏人数</b>
+          <small>座位数由房主决定。人没坐满时空位交给电脑；
+                 3 人局 52 张按 17 张发、余下 1 张随机补给其中一人</small>
+        </div>
+        <div class="segmented" id="segMode">
+          <button class="seg" data-value="3">3 人</button>
+          <button class="seg" data-value="4">4 人</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 设置浮层 -->
@@ -262,6 +329,18 @@
       <p>开始界面（正中的「开始游戏」按钮下面）随时能看到你自己的输赢局数；
         每局结束的结算表只列各家<b>名次 / 剩余张数 / 剩余的具体牌</b>，下面一行是你的累计输赢局数。</p>
       <p>战绩只保存在本次打开页面期间——刷新或关掉页面就重新从 0 开始算。</p>
+      <h3>联机（和朋友一起玩）</h3>
+      <ul>
+        <li>点顶栏或开始界面的 <b>🌐 联机</b>：一个人「开房」拿到 4 位房间码，其他人输房间码加入。</li>
+        <li><b>不需要服务器</b>：开房的那台设备既是玩家也是「房主」，其他人通过 WebRTC 直连它。
+            同一个 Wi-Fi、手机热点、甚至两人在不同网络下一般都能连上。</li>
+        <li>房主负责发牌、校验每个人的出牌、以及<b>替没坐满的座位打电脑</b>。</li>
+        <li><b>看不见别人的牌</b>：服务端只把「你自己的手牌 + 公开信息」发给你。
+            就算开浏览器的开发者工具，也只能看到自己那 13 张。</li>
+        <li>A3 地主的暗队身份同样保密：谁捏着 ♠A / ♠3，只有亮牌那一刻才会公开。</li>
+        <li>房间没坐满也能开：空座位由电脑补上；掉了线的人，房主会先替他打，重连回来接着玩。</li>
+        <li>房主把页面关掉，这一局就结束了。</li>
+      </ul>
     </div>
     <div class="dialog-actions">
       <button id="btnCloseRules" class="btn primary">知道了</button>
@@ -280,14 +359,21 @@
   </div>
 </div>
 
-<script src="js/cards.js?v=11"></script>
-<script src="js/game.js?v=11"></script>
-<script src="js/determinize.js?v=11"></script>
-<script src="js/endgame.js?v=11"></script>
-<script src="js/mcts.js?v=11"></script>
-<script src="js/ai.js?v=11"></script>
-<script src="js/sound.js?v=11"></script>
-<script src="js/ui.js?v=11"></script>
-<script src="js/orientation.js?v=11"></script>
+<!-- 联机依赖：PeerJS（已 vendor 到本地，不依赖 CDN） -->
+<script src="vendor/peerjs.min.js?v=12"></script>
+
+<script src="js/cards.js?v=12"></script>
+<script src="js/game.js?v=12"></script>
+<script src="js/determinize.js?v=12"></script>
+<script src="js/endgame.js?v=12"></script>
+<script src="js/mcts.js?v=12"></script>
+<script src="js/ai.js?v=12"></script>
+<script src="js/sound.js?v=12"></script>
+<!-- 联机三层：裁剪视图 → 传输 → 权威房间。必须在 ui.js 之前加载 -->
+<script src="js/protocol.js?v=12"></script>
+<script src="js/net.js?v=12"></script>
+<script src="js/room.js?v=12"></script>
+<script src="js/ui.js?v=12"></script>
+<script src="js/orientation.js?v=12"></script>
 </body>
 </html>

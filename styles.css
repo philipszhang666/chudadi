@@ -685,3 +685,159 @@ html, body {
   .actions { gap: 8px; padding-top: 14px; }
   .sel-info { font-size: 11px; margin-left: 6px; }
 }
+
+/* ============================================================
+   联机（WebRTC 直连）—— 大厅、房间码、状态
+   ============================================================ */
+
+/* 顶栏的网络状态：平时隐藏，联机时显示房间码和身份 */
+.net-status {
+  font-size: 12px;
+  color: var(--gold);
+  background: rgba(232, 195, 122, .12);
+  border: 1px solid rgba(232, 195, 122, .3);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+  max-width: 46vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.net-status[hidden] { display: none; }
+
+/* 开始界面里的联机入口 */
+.net-entry { margin-top: 2px; font-size: 13px; }
+
+/* ---------------- 联机浮层 ---------------- */
+
+.lobby-lead {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #b9cfc4;
+}
+
+.lobby-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 560px) {
+  .lobby-cols { grid-template-columns: 1fr; }
+}
+
+.lobby-col {
+  background: rgba(255, 255, 255, .04);
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.lobby-col h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--gold);
+  font-weight: 600;
+}
+.lobby-note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #9fb8ac;
+}
+
+.lobby-join { display: flex; gap: 8px; }
+
+/* 房间码输入：4 个大写字母，居中等宽，方便照着念 */
+.code-input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 20px;
+  letter-spacing: 6px;
+  text-align: center;
+  text-transform: uppercase;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(0, 0, 0, .3);
+  color: #fff;
+}
+.code-input:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+/* ---------------- 房间面板 ---------------- */
+
+.lobby-room {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+}
+
+.lobby-code-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.lobby-label { font-size: 12px; color: #9fb8ac; }
+#lobbyCode {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 26px;
+  letter-spacing: 8px;
+  color: var(--gold);
+  padding-right: 2px;
+}
+.btn.small { font-size: 12px; padding: 4px 10px; }
+
+/* 邀请链接：默认收起，点「复制邀请链接」时才需要看到 */
+.link-input {
+  width: 100%;
+  margin-top: 8px;
+  font-size: 12px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .15);
+  background: rgba(0, 0, 0, .3);
+  color: #cfe3d8;
+}
+
+.lobby-players {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+.lobby-row {
+  display: grid;
+  grid-template-columns: 40px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .05);
+  font-size: 13px;
+}
+.lobby-row.empty { background: transparent; border: 1px dashed rgba(255, 255, 255, .12); color: #77918a; }
+.lobby-row.off { opacity: .5; }
+.lb-seat { font-family: ui-monospace, Consolas, monospace; color: var(--gold); font-size: 12px; }
+.lb-tag { font-size: 11px; color: #9fb8ac; }
+
+/* 联机浮层：昵称 + 房间配置 */
+.lobby-name-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.nick-input {
+  width: 130px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(0, 0, 0, .3);
+  color: #fff;
+  font-size: 13px;
+}
+.nick-input:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+
+.lobby-config { margin-top: 14px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, .1); }
+.lobby-config .set-row { padding: 8px 0; }

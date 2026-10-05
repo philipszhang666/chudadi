@@ -14,6 +14,39 @@
   var timers = [];
   var botTimerPending = false;
 
+  /* ---------------- 联机状态 ----------------
+     单机（solo）时这一整块都保持关闭，走的是原来那条本地路径。
+     联机时：
+       · mode === 'online'
+       · netSeat  —— 我在牌局里的座位号（房主恒为 0）
+       · room     —— Room 实例；真 state 只存在房主那一端，
+                     其余人手里的 state 全是房主裁剪后发来的视图 */
+  var mode = 'solo';            // 'solo' | 'online'
+  var room = null;              // Room.create(...) 的实例
+  var netSeat = 0;              // 我的座位
+  var netCode = '';             // 房间码
+  var netIsHost = false;
+  var netRoster = [];           // [{ seat, name, isHost, online }]
+  var netBusy = false;          // 等房主回消息（本地点击已发出，尚未落地）
+  var lastViewSeq = -1;
+  var localActionSeq = 0;       // 联机：我给房主发出去的动作序号
+  var netStatus = '';           // 顶栏/底部显示的网络状态文字
+
+  /** 我的座位号。单机时人类恒为 0，联机时是房主分配的座位 */
+  function myIdx() { return mode === 'online' ? netSeat : 0; }
+
+  /** 轮到我了吗 */
+  function isMyTurn() {
+    return !!state && state.phase === 'playing' && state.turn === myIdx();
+  }
+
+  /** 名字 → 显示用。联机时用真人名字，单机时是「你/西家/北家/东家」 */
+  function isMe(seat) { return seat === myIdx(); }
+  function playerName(seat) {
+    if (!state || !state.players[seat]) return '';
+    return isMe(seat) ? '你' : state.players[seat].name;
+  }
+
   /* ---------------- 设置 ---------------- */
 
   var SETTINGS_KEY = 'chudadi.settings.v2';
@@ -123,6 +156,26 @@
     3: 2,   // 用 SEAT_SLOTS 的前 2 个
     4: 3    // 用前 3 个
   };
+
+  /* ---------------- 视角旋转（联机必需） ----------------
+     单机时人类恒为 0 号位，`player.index - 1` 直接就是屏幕槽位。
+     联机时每个人都要看自己坐在正下方，所以要按「我」把对手位整体转一下：
+     牌局里的座位号 → 屏幕槽位号。
+
+     槽位顺序 SEAT_SLOTS = 右上、左上、左下、左下旁边那个（br，4 人局才用得上）。
+     4 人局我只有 3 个对手位，正好把槽位 0~2 排满；
+     3 人局只有 2 个对手，用前 2 个槽位（和单机时两个上角的对称布局一致）。 */
+  function slotOfSeat(seat) {
+    if (!state) return -1;
+    if (isMe(seat)) return -1;                       // -1 = 正下方，我的位置
+    var layout = ProtocolNS.seatLayout(state.players.length, myIdx());
+    return layout[seat];
+  }
+
+  /** 当前这局要显示几个对手槽位 */
+  function usedSlotCount() {
+    return state ? (LAYOUT_BY_COUNT[state.players.length] || LAYOUT_BY_COUNT[4]) : 0;
+  }
 
   /* ---------------- 小工具 ---------------- */
 
@@ -235,7 +288,7 @@
 
   /** 按人数显示/隐藏角落座位，并同步你自己的座位信息 */
   function applyLayout() {
-    var used = LAYOUT_BY_COUNT[state.players.length] || LAYOUT_BY_COUNT[4];
+    var used = usedSlotCount();
     SEAT_SLOTS.forEach(function (id, i) {
       var box = $(id);
       if (box) box.hidden = (i >= used);
@@ -247,13 +300,19 @@
   function renderMySeat() {
     var box = $('seat-me');
     if (!box) return;
-    var me = state.players[0];
+    var mine = myIdx();
+    var me = state.players[mine];
     var inline = $('myCountInline');
     if (inline) inline.textContent = me.hand.length + ' 张';
 
     // 名字元素在 index.html 里（不要清空 box，否则会把它删掉）
     var name = box.querySelector ? box.querySelector('.pname') : null;
-    if (name) name.classList.toggle('active', state.turn === 0 && state.phase === 'playing');
+    if (name) {
+      name.classList.toggle('active', isMyTurn());
+      // 联机时正下方显示真人的名字
+      var label = name.querySelector ? name.querySelector('.me-label') : null;
+      if (label) label.textContent = mode === 'online' ? (me.name || '你') : '你';
+    }
 
     var info = $('mySeatInfo');
     if (!info) return;
@@ -262,17 +321,20 @@
     if (me.rank === 1) bits.push(['rank1', '头游']);
     else if (me.finished) bits.push([null, '第 ' + me.rank + ' 名']);
     if (me.announced) bits.push(['rank1', '报牌 1 张']);
-    if (state.landlord && state.landlord.members.indexOf(0) >= 0) {
-      var selfRevealed = state.revealed['AS'] === 0 || state.revealed['3S'] === 0;
+    if (state.landlord && state.landlord.members.indexOf(mine) >= 0) {
+      var selfRevealed = state.revealed['AS'] === mine || state.revealed['3S'] === mine;
       bits.push(['landlord', selfRevealed ? '地主（已亮牌）' : '暗地主']);
     }
-    if (state.phase === 'playing' && state.turn === 0) bits.push([null, '轮到你出牌']);
+    if (isMyTurn()) bits.push([null, '轮到你出牌']);
     bits.forEach(function (b) { info.appendChild(el('span', b[0], b[1])); });
   }
 
   function renderSeat(player) {
-    var box = $(SEAT_SLOTS[player.index - 1]);
+    var slot = slotOfSeat(player.index);
+    if (slot < 0) return;                     // 我自己坐正下方，不走这里
+    var box = $(SEAT_SLOTS[slot]);
     if (!box) return;
+    box.hidden = false;
     box.innerHTML = '';
 
     var name = el('div', 'pname' + (state.turn === player.index && state.phase === 'playing' ? ' active' : ''));
@@ -330,7 +392,7 @@
     if (state.phase === 'over') {
       tag.textContent = '本局结束';
     } else {
-      tag.textContent = state.turn === 0 ? '轮到你出牌' : state.players[state.turn].name + ' 出牌中';
+      tag.textContent = isMyTurn() ? '轮到你出牌' : state.players[state.turn].name + ' 出牌中';
     }
     $('roundTag').textContent = '第 ' + state.round + ' 墩';
     renderTrickLog();   // 出牌记录每次出牌 / 过牌都要刷新（不受下面“桌面牌没变”的短路影响）
@@ -421,6 +483,13 @@
 
   /** 回到未开局状态。summary 传入上一局结果时会显示出来 */
   function showStartScreen(summary) {
+    // 联机时不能自己把牌桌清掉：牌局在房主那里，客户端清空只会
+    // 让自己看到一个空桌子、然后被下一帧视图又填回来。
+    if (mode === 'online') {
+      if (!netIsHost) { setSelInfo('等房主开局…'); return; }
+      // 房主回到候场界面 = 通知所有人这一局结束、准备下一局
+      if (room) { try { room.backToLobby(); } catch (e) {} }
+    }
     clearTimers();          // 作废在途定时器，电脑不会自己接着出牌
     busy = false;
     botTimerPending = false;
@@ -489,7 +558,7 @@
   /* ---------------- 渲染：我的手牌 ---------------- */
 
   function currentLegal() {
-    if (!state || state.phase !== 'playing' || state.turn !== 0) return [];
+    if (!state || state.phase !== 'playing' || !isMyTurn()) return [];
     if (legalCache.turn === state.turn && legalCache.current === state.current &&
         legalCache.moveCount === state.moveCount) return legalCache.list;
     var list = Game.legalMoves(state);
@@ -508,13 +577,13 @@
 
   function renderHandCards() {
     if (!state) return;
-    var me = state.players[0];
+    var me = state.players[myIdx()];
     var box = $('hand');
     box.innerHTML = '';
     // 默认不加任何视觉提示；只有设置里打开「标注不能出的牌」才逐张压暗
     box.classList.toggle('dim-on', !!settings.dimUnplayable);
     var legal = currentLegal();
-    var myTurn = state.phase === 'playing' && state.turn === 0;
+    var myTurn = isMyTurn();
     // 轮到我、且桌上这手我一张都压不过（只能过牌）→ 整把牌一律压暗。
     // 这条规则永远生效，和设置里的「标注不能出的牌」开关无关。
     var cannotPlay = myTurn && state.current !== null && legal.length === 0;
@@ -578,7 +647,7 @@
    */
   function doGroup() {
     if (!state) return;
-    var order = handDisplayOrder(state.players[0].hand);
+    var order = handDisplayOrder(state.players[myIdx()].hand);
     var picked = order.filter(function (c) { return selected[c.id]; })
       .map(function (c) { return c.id; });
 
@@ -623,21 +692,20 @@
      合法性判断统一放在点「出牌」的 doPlay 里。 */
 
   function selectedCards() {
-    return state.players[0].hand.filter(function (c) { return selected[c.id]; });
+    return state.players[myIdx()].hand.filter(function (c) { return selected[c.id]; });
   }
 
   function updateSelection() {
     if (!state) return;                 // 未开局：没有任何可操作的东西
-    var me = state.players[0];
-    var myTurn = state.phase === 'playing' && state.turn === 0;
+    var myTurn = isMyTurn();
     var legal = currentLegal();
     var cards = selectedCards();
 
     renderMySeat();     // 座位高亮 / 张数也要跟着轮次更新
     renderHand();
 
-    $('btnPass').disabled = !myTurn || state.current === null;
-    $('btnPlay').disabled = !myTurn || !cards.length;
+    $('btnPass').disabled = !myTurn || state.current === null || netBusy;
+    $('btnPlay').disabled = !myTurn || !cards.length || netBusy;
     $('btnHint').disabled = !myTurn || !legal.length;
 
     if (state.phase === 'over') {
@@ -775,7 +843,7 @@
     announceLandlordCards(play, actor);
 
     if (state.phase === 'over') { scheduleResult(); return; }
-    if (state.turn === 0) { announceMyTurn(); return; }
+    if (isMyTurn()) { announceMyTurn(); return; }
     scheduleBots();
   }
 
@@ -798,7 +866,7 @@
     if (!state || !state.landlord || !play || !play.cards || !actor) return;
     play.cards.forEach(function (c) {
       if ((c.id !== 'AS' && c.id !== '3S') || state.revealed[c.id] !== actor.index) return;
-      var partner = state.landlord.members.indexOf(0) >= 0 && actor.index !== 0;
+      var partner = state.landlord.members.indexOf(myIdx()) >= 0 && !isMe(actor.index);
       var msg = actor.name + ' 亮出 ' + CD.cardText(c) + '！' + (partner ? ' 他就是你的队友！' : '');
       later(function () { setTip(msg); }, 120);
     });
@@ -818,19 +886,45 @@
   }
 
   function doPlay() {
-    if (!state || busy || state.phase !== 'playing' || state.turn !== 0) return;
+    if (!state || busy || netBusy || state.phase !== 'playing' || !isMyTurn()) return;
     var cards = selectedCards();
     if (!cards.length) return;
-    var r = Game.play(state, 0, cards);
+
+    if (mode === 'online') {
+      // 联机：本地不落地，只把「我想出这几张」发给房主，
+      // 由房主用同一份 game.js 校验后再广播回来。乐观地先取消选中，
+      // 手感更跟手；被拒的话会弹提示并恢复。
+      var ids = cards.map(function (c) { return c.id; });
+      netBusy = true;
+      lastActionSeq = ++localActionSeq;
+      Net.send({ type: ProtocolNS.C2H.ACTION, seq: lastActionSeq, action: 'play', cards: ids });
+      selected = {};
+      updateSelection();
+      setSelInfo('已发出，等房主确认…');
+      return;
+    }
+
+    var r = Game.play(state, myIdx(), cards);
     if (!r.ok) { setSelInfo('✗ ' + r.reason, 'err'); sfx('error'); return; }
     selected = {};
-    finishMove(r.play, state.players[0]);
+    finishMove(r.play, state.players[myIdx()]);
   }
 
   function doPass() {
-    if (!state || busy || state.phase !== 'playing' || state.turn !== 0) return;
+    if (!state || busy || netBusy || state.phase !== 'playing' || !isMyTurn()) return;
     if (state.current === null) { setSelInfo('✗ 领出时不能过牌，必须出牌', 'err'); sfx('error'); return; }
-    var r = Game.pass(state, 0);
+
+    if (mode === 'online') {
+      netBusy = true;
+      lastActionSeq = ++localActionSeq;
+      Net.send({ type: ProtocolNS.C2H.ACTION, seq: lastActionSeq, action: 'pass' });
+      selected = {};
+      updateSelection();
+      setSelInfo('已发出，等房主确认…');
+      return;
+    }
+
+    var r = Game.pass(state, myIdx());
     if (!r.ok) { setSelInfo('✗ ' + r.reason, 'err'); sfx('error'); return; }
     selected = {};
     finishMove(null, null);
@@ -868,7 +962,7 @@
   }
 
   function selectedCardsIds() {
-    return state.players[0].hand.filter(function (c) { return selected[c.id]; })
+    return state.players[myIdx()].hand.filter(function (c) { return selected[c.id]; })
       .map(function (c) { return c.id; });
   }
 
@@ -926,7 +1020,19 @@
 
   function scheduleBots() {
     if (!state || state.phase !== 'playing') { busy = false; return; }
-    if (state.turn === 0) {
+
+    // 联机时的分工：
+    //   · 房主那一端负责跑 AI（电脑位 + 掉线代打），它自己那步走本地。
+    //   · 纯客户端不跑任何 AI，也不用等谁 —— 局面全靠房主发来的视图推进。
+    if (mode === 'online' && !netIsHost) {
+      busy = false;
+      netBusy = false;
+      syncTurnUI();
+      announceMyTurn();
+      return;
+    }
+
+    if (isMyTurn()) {
       // 轮到玩家：必须清掉 busy 并同步按钮，
       // 否则 doPlay/doPass 开头的 busy 守卫会静默吞掉点击
       busy = false;
@@ -949,15 +1055,21 @@
   /** 轮到我出牌时的提示音（只在「刚轮到我」的那一下响） */
   var lastTurnAnnounced = -1;
   function announceMyTurn() {
-    if (!state || state.phase !== 'playing' || state.turn !== 0) return;
+    if (!state || state.phase !== 'playing' || !isMyTurn()) return;
     // 用 moveCount 去重：同一手不要重复响
     if (lastTurnAnnounced === state.moveCount) return;
     lastTurnAnnounced = state.moveCount;
     sfx('turn');
   }
 
+  /** 联机专用：AI 由房主的 room.pump() 统一推进，这里不再本地算 */
   function botPlay() {
-    if (!state || state.phase !== 'playing' || state.turn === 0) return;
+    if (!state || state.phase !== 'playing' || isMyTurn()) return;
+    if (mode === 'online') {
+      busy = false;
+      if (netIsHost) room.pump();     // 房主：催一下 AI 队列
+      return;
+    }
     if (botTimerPending) return;
     var idx = state.turn;
     var actor = state.players[idx];
@@ -1023,7 +1135,7 @@
     announceLandlordCards(r.play, actor);
 
     if (state.phase === 'over') { busy = false; scheduleResult(); return; }
-    if (state.turn === 0) { busy = false; syncTurnUI(); announceMyTurn(); return; }
+    if (isMyTurn()) { busy = false; syncTurnUI(); announceMyTurn(); return; }
 
     // 下一个还是电脑：交给 scheduleBots，先重绘再开始下一步的「先算」
     scheduleBots();
@@ -1062,13 +1174,45 @@
 
   /** 我的战绩文字：胜 3 局 · 平 2 局 · 负 1 局（共 6 局） */
   function myRecordText() {
-    var name = state ? state.players[0].name : '你';
+    var name = state ? state.players[myIdx()].name : '你';
     var t = tallyOf(name);
     var total = t.win + t.draw + t.lose;
     return '你 胜 ' + t.win + ' 局 · 平 ' + t.draw + ' 局 · 负 ' + t.lose + ' 局（共 ' + total + ' 局）';
   }
 
   /* ---------------- 结算 ---------------- */
+
+  /** 从我自己的名次推「胜 / 平 / 负」（打到末游模式） */
+  function myRankOutcome() {
+    var d = null;
+    (state.result.detail || []).forEach(function (x) {
+      if (x.index === myIdx()) d = x;
+    });
+    if (!d) return 'draw';
+    return d.rank === 1 ? 'win' : (d.rank === 2 ? 'draw' : 'lose');
+  }
+
+  /**
+   * 统一取「我这局是胜/平/负」。
+   * 联机时 state.result.humanOutcome / landlord.humanOutcome 是按 0 号位
+   * 算出来的（那是房主），客户端照抄会看到别人的战绩，所以这里一律
+   * 从公开的名次信息重新推。
+   */
+  function myOutcomeFromRes(res) {
+    if (mode === 'online') {
+      if (res.landlord) {
+        var per = res.landlord.playerOutcome || {};
+        return per[myIdx()] || 'draw';
+      }
+      if (res.ranked) return myRankOutcome();
+      // 经典玩法：头游算赢
+      return isMe(res.winner) ? 'win' : 'lose';
+    }
+    // 单机：权威 state 里的结果本来就是我的
+    if (res.landlord) return res.landlord.humanOutcome;
+    if (res.ranked) return res.humanOutcome;
+    return isMe(res.winner) ? 'win' : 'lose';
+  }
 
   function scheduleResult() {
     later(showResult, 700);
@@ -1077,7 +1221,9 @@
   /** 非 A3「打到末游」的结算：按玩家名次给 胜 / 平 / 负 */
   function showRankedResult(res) {
     var flat = { win: '你胜', draw: '平局', lose: '你负' };
-    var human = res.humanOutcome;
+    // 注意：res.humanOutcome 是「房主/0 号位」的结果（权威 state 里算的）。
+    // 联机时每个人胜负不同，必须从自己的名次重新推，否则客户端会看到房主的战绩。
+    var human = myOutcomeFromRes(res);
 
     lastSummary = '上一局：' + flat[human];
     sfx(human === 'win' ? 'win' : (human === 'lose' ? 'lose' : 'tap'));
@@ -1123,11 +1269,11 @@
 
     // ---- 经典玩法：头游即赢 ----
     // 写进「开始界面」，关掉结算浮层后还能看到上一局是谁赢的
-    lastSummary = '上一局：' + (res.winner === 0 ? '你赢了！' : state.players[res.winner].name + ' 先出完');
+    lastSummary = '上一局：' + (isMe(res.winner) ? '你赢了！' : state.players[res.winner].name + ' 先出完');
 
-    sfx(res.winner === 0 ? 'win' : 'lose');
+    sfx(isMe(res.winner) ? 'win' : 'lose');
 
-    $('resultTitle').textContent = res.winner === 0 ? '🎉 你赢了！' : state.players[res.winner].name + ' 先出完';
+    $('resultTitle').textContent = isMe(res.winner) ? '🎉 你赢了！' : state.players[res.winner].name + ' 先出完';
     var body = $('resultBody');
     body.innerHTML = '';
 
@@ -1162,7 +1308,7 @@
     var ll = res.landlord;
     var flat = { win: '胜', draw: '平', lose: '负' };
     var mine = { win: '你胜', draw: '平局', lose: '你负' };
-    var human = ll.humanOutcome;
+    var human = myOutcomeFromRes(res);   // 联机时按自己的座位重推，别抄房主的
 
     lastSummary = '上一局（A3 地主）：' + mine[human];
     sfx(human === 'win' ? 'win' : (human === 'lose' ? 'lose' : 'tap'));
@@ -1211,10 +1357,13 @@
   function renderAll() {
     if (!state) return;
     applyLayout();   // 内部会调用 renderMySeat
-    state.players.slice(1).forEach(renderSeat);
+    // 所有「不是我」的座位都画到旋转后的槽位上（槽位号由 slotOfSeat 算）
+    state.players.forEach(function (p) {
+      if (!isMe(p.index)) renderSeat(p);
+    });
     renderCenter();
     renderHand();
-    var myTurn = state.phase === 'playing' && state.turn === 0;
+    var myTurn = isMyTurn();
     if (myTurn) {
       var legal = currentLegal();
       if (!legal.length && state.current) setTip('没有能压过的牌，请过牌');
@@ -1231,8 +1380,29 @@
 
   /* ---------------- 开局 ---------------- */
 
-  /** 开始新的一局：发牌、把「开始游戏」界面收起来、该谁先出就谁先出 */
+  /**
+   * 「开始游戏」按钮的唯一入口。
+   *   单机 —— 本地发牌（newSoloGame）
+   *   联机 —— 只有房主能开局：交给 room 发牌，再广播给所有人
+   */
   function newGame() {
+    if (mode === 'online') {
+      if (!netIsHost) { setSelInfo('等房主开局…'); return; }
+      var r = room.startGame({
+        playerCount: settings.playerCount,
+        landlord: settings.landlord,
+        nonA3ToLast: settings.nonA3ToLast,
+        difficulty: settings.difficulty,
+        speed: settings.speed
+      });
+      if (!r.ok) { setTip('✗ ' + r.reason, 'err'); sfx('error'); return; }
+      return;
+    }
+    newSoloGame();
+  }
+
+  /** 开始新的一局：发牌、把「开始游戏」界面收起来、该谁先出就谁先出 */
+  function newSoloGame() {
     clearTimers();
     ensureWorker();          // 预热 AI 后台线程（先把各家 AI 模块加载好）
     busy = false;
@@ -1246,14 +1416,434 @@
     dragging = false;                       // 收尾可能残留的拖动状态
     suppressClick = false;
     state = Game.newGame({ playerCount: settings.playerCount, landlord: settings.landlord, nonA3ToLast: settings.nonA3ToLast });
-    $('overlay').hidden = true;
+    presentBoard();
+    sfx('deal');
+    renderAll();
+    if (mode === 'solo' && state.turn !== 0) scheduleBots();
+    else announceMyTurn();
+  }
+
+  /** 把「开始游戏」界面收起来、恢复牌桌。
+      单机开局和联机收到首帧时都走这里，保证两边界面状态一致。 */
+  function presentBoard() {
+    var ov = $('overlay');
+    if (ov) ov.hidden = true;
     if ($('startScreen')) $('startScreen').hidden = true;   // 收起「开始游戏」
     if ($('btnGroup')) $('btnGroup').disabled = false;      // 未开局时禁用过，这里放开
     if ($('center')) $('center').classList.remove('idle');  // 恢复中央的轮次/说明
-    sfx('deal');
-    renderAll();
-    if (state.turn !== 0) scheduleBots();
-    else announceMyTurn();
+  }
+
+  /* ============================================================
+   * 联机：界面接线
+   *
+   * 这一块把 net.js（管子）/ room.js（裁判）/ protocol.js（裁剪）
+   * 接到现有界面上。单机路径一行都没动过：mode === 'solo' 时
+   * 下面所有函数要么不参与，要么直接 return。
+   * ============================================================ */
+
+  var netPokeCount = 0;
+
+  /** 从 URL 里读 ?room=XXXX（方便把带房间码的链接直接发群里） */
+  function codeFromUrl() {
+    try {
+      var m = /[?&]room=([A-Za-z0-9]{1,8})/.exec(window.location.search || '');
+      return m ? ProtocolNS.normalizeCode(m[1]) : '';
+    } catch (e) { return ''; }
+  }
+
+  function setNetStatus(text) {
+    netStatus = text || '';
+    var box = $('netStatus');
+    if (box) {
+      box.textContent = netStatus;
+      box.hidden = !netStatus;
+    }
+  }
+
+  /** 联机：把房主发来的视图同步到界面上（房主自己也走这条路径）
+      force = 真时跳过序号去重（欢迎消息里带的首帧视图要用） */
+  function syncFromView(e, force) {
+    var incoming = e && e.view;
+    if (!incoming) return;
+    if (!force) {
+      if (e.seq !== undefined && e.seq <= lastViewSeq) return;   // 旧消息，丢掉
+      if (e.seq !== undefined) lastViewSeq = e.seq;
+    }
+    if (e.roster) netRoster = e.roster;
+
+    var wasOver = !!(state && state.phase === 'over');
+    var haveBoard = !!state;
+    var extra = (e && e.extra) || {};
+    state = incoming;
+
+    // 解掉「等房主确认」的锁。但只认自己那一步：如果广播回来的
+    // 是别人更晚的一步（actionId 比我的大），说明我这手早就被处理过了，
+    // 这时候不能盲目解锁，否则按钮会在还没轮到我的时候亮起来。
+    if (netBusy) {
+      if (extra.actionId === undefined || extra.actionId <= localActionSeq) {
+        netBusy = false;
+        setSelInfo('', '');
+      }
+    }
+
+    // 名字同步成真人的（房主会把座位上的名字换成 join 时的昵称）
+    if (incoming.players && incoming.players[myIdx()]) {
+      var nick = incoming.players[myIdx()].name;
+      if (nick) try { window.localStorage.setItem('chudadi.nick', nick); } catch (err) {}
+    }
+
+    if (incoming.phase === 'over') {
+      // 结算：房主已经算好了，客户端只是把结果画出来
+      renderAll();
+      if (!wasOver) scheduleResult();
+      return;
+    }
+
+    if (!haveBoard && incoming.phase === 'playing') {
+      presentBoard();     // 首帧：收起开始界面、清掉上一局的残留
+      sfx('deal');
+      renderAll();
+      return;
+    }
+
+    // 中局推进：和本地出手后一样，走同一套收尾（重绘 + 音效 + 提示）
+    var lastTrickEntry = null;
+    for (var i = state.trick.length - 1; i >= 0; i--) {
+      if (state.trick[i].player === extra.seat) { lastTrickEntry = state.trick[i]; break; }
+    }
+    if (!lastTrickEntry && state.lastTrick) {
+      for (var j = state.lastTrick.length - 1; j >= 0; j--) {
+        if (state.lastTrick[j].player === extra.seat) { lastTrickEntry = state.lastTrick[j]; break; }
+      }
+    }
+    var actor = state.players[extra.seat];
+    finishMove(lastTrickEntry && !lastTrickEntry.passed ? lastTrickEntry.play : null, actor);
+    setNetStatus(mode === 'online' ? ('联机中 · 房间 ' + netCode + (netIsHost ? ' · 你是房主' : '')) : '');
+  }
+
+  /** 联机：房间名单 / 配置变了 */
+  function syncLobby(e) {
+    if (e && e.roster) netRoster = e.roster;
+    // 回到候场：下一局的视图序号会从 0 重新开始，去重基准也要跟着归零，
+    // 否则新一局的视图会被当成旧消息全部丢掉
+    if (e && e.phase === 'lobby') lastViewSeq = -1;
+    if (e && e.config) {
+      // 客户端的设置跟着房主走（人数 / 玩法）
+      settings.playerCount = e.config.playerCount;
+      settings.landlord = !!e.config.landlord;
+      settings.nonA3ToLast = !!e.config.nonA3ToLast;
+      if (e.config.difficulty) settings.difficulty = e.config.difficulty;
+      if (e.config.speed) settings.speed = e.config.speed;
+      applySettingsToUI();
+    }
+    renderLobby();
+  }
+
+  /** 联机：把结算浮层关掉后回到候场界面 */
+  function onlineBackToLobby() {
+    showStartScreen('');
+    renderLobby();
+  }
+
+  /* ---------------- 大厅界面 ---------------- */
+
+  function renderLobby() {
+    var list = $('lobbyPlayers');
+    if (!list) return;
+    list.innerHTML = '';
+    var need = settings.playerCount;
+    netRoster.slice().sort(function (a, b) { return a.seat - b.seat; }).forEach(function (r) {
+      var row = el('div', 'lobby-row' + (r.online ? '' : ' off'));
+      row.appendChild(el('span', 'lb-seat', 'P' + (r.seat + 1)));
+      row.appendChild(el('span', 'lb-name', r.name + (isMe(r.seat) ? '（你）' : '')));
+      row.appendChild(el('span', 'lb-tag', r.isHost ? '房主' : (r.online ? '已就位' : '掉线')));
+      list.appendChild(row);
+    });
+    for (var i = netRoster.length; i < need; i++) {
+      var empty = el('div', 'lobby-row empty');
+      empty.appendChild(el('span', 'lb-seat', 'P' + (i + 1)));
+      empty.appendChild(el('span', 'lb-name', '等待加入…'));
+      empty.appendChild(el('span', 'lb-tag', ''));
+      list.appendChild(empty);
+    }
+
+    var codeBox = $('lobbyCode');
+    if (codeBox) codeBox.textContent = netCode || '—';
+    var linkBox = $('lobbyLink');
+    if (linkBox) {
+      try { linkBox.value = window.location.origin + window.location.pathname + '?room=' + netCode; }
+      catch (e) { linkBox.value = ''; }
+    }
+
+    var startBtn = $('btnLobbyStart');
+    if (startBtn) {
+      startBtn.hidden = !netIsHost;
+      startBtn.disabled = netRoster.filter(function (r) { return r.online; }).length < 2;
+    }
+    var hint = $('lobbyHint');
+    if (hint) {
+      hint.textContent = netIsHost
+        ? (netRoster.filter(function (r) { return r.online; }).length < 2
+            ? '至少要有 2 个人才能开局：把上面的链接发到群里，或让朋友扫码进来'
+            : '人都到齐了就点「开始游戏」；没坐满的座位交给电脑')
+        : '已连上房主，等房主点「开始游戏」…（人不够时房主的电脑会补位）';
+    }
+  }
+
+  function showLobbyOverlay() {
+    var ov = $('lobbyOverlay');
+    if (ov) ov.hidden = false;
+    renderLobby();
+  }
+
+  /* ---------------- 联机：启动房主 / 加入 ---------------- */
+
+  function netHostGame() {
+    if (!Net.available()) { setTip('✗ 联机脚本没加载上（vendor/peerjs.min.js 缺失？）', 'err'); return; }
+    mode = 'online';
+    netIsHost = true;
+    netSeat = 0;
+    netRoster = [];
+    lastViewSeq = -1;
+    showLobbyOverlay();
+
+    room = Room.create({
+      net: Net,
+      ai: {
+        decide: function (st, idx, diff, o) { return AI.decide(st, idx, diff, o || {}); },
+        algo: function (d) { return DIFF_ALGO[d] || DIFF_ALGO.normal; },
+        speedMs: function (s) { return SPEED[s] !== undefined ? SPEED[s] : SPEED.normal; }
+      },
+      on: {
+        lobby: function (e) { syncLobby(e); },
+        view: function (e) { syncFromView(e); },
+        started: function () {
+          var ov = $('lobbyOverlay'); if (ov) ov.hidden = true;
+          setNetStatus('联机中 · 房间 ' + netCode + ' · 你是房主');
+        },
+        finished: function () { /* syncFromView 里会处理结算 */ },
+        closed: function () { onNetClosed('房间已关闭'); }
+      }
+    });
+
+    Net.on('ready', function (e) {
+      netCode = e.code;
+      room.startHost({ name: netNick(), config: netConfig() });
+      renderLobby();
+      setNetStatus('联机中 · 房间 ' + netCode + ' · 你是房主');
+    });
+    Net.on('data', function (msg, conn) { if (room) room.onData(msg, conn); });
+    Net.on('conn', function (conn) { if (room) room.onConn(conn); });
+    Net.on('disconn', function (conn) { if (room) room.onDisconn(conn); });
+    // PeerJS 报「和某个 peer 的连接出问题了」= 那个客户端掉线了。
+    // 光靠 DataConnection 的 close 事件在手机上不一定触发，这条更可靠。
+    Net.on('peer-lost', function (e) {
+      var seat = Net.seatOfCode(e.code);
+      if (seat === null || seat === undefined) return;
+      if (room) room.onDisconn({ __seat: seat });
+      renderLobby();
+    });
+    Net.on('error', function (e) {
+      showNetError(e);
+    });
+    Net.on('signal-lost', function () { setNetStatus('信令连接中断，重连中…（已在房里的人不受影响）'); });
+    Net.host();
+  }
+
+  function netJoinGame(rawCode) {
+    if (!Net.available()) { setTip('✗ 联机脚本没加载上（vendor/peerjs.min.js 缺失？）', 'err'); return; }
+    var c = ProtocolNS.normalizeCode(rawCode);
+    if (c.length < 4) { setTip('✗ 房间码是 4 位，例如 ABCD', 'err'); return; }
+
+    // 前 20 秒算「首次加入」，之后报错就按「重连时房主已走」来解释
+    var joining = true;
+    setTimeout(function () { joining = false; }, 20000);
+
+    mode = 'online';
+    netIsHost = false;
+    netCode = c;
+    netRoster = [];
+    lastViewSeq = -1;
+    setNetStatus('正在连房间 ' + c + ' …');
+    showLobbyOverlay();
+
+    room = Room.create({
+      net: Net,
+      ai: { decide: function () { return { action: 'pass' }; } },   // 客户端不跑 AI
+      on: {
+        lobby: function (e) { syncLobby(e); },
+        welcome: function (e) {
+          netSeat = e.seat;
+          netCode = e.code || c;
+          if (e.config) { Object.keys(e.config).forEach(function (k) { settings[k] = e.config[k]; }); }
+          if (e.roster) netRoster = e.roster;
+          applySettingsToUI();
+          renderLobby();
+          setNetStatus('联机中 · 房间 ' + netCode + (netIsHost ? ' · 你是房主' : ''));
+          // 局中重连时房主会在 WELCOME 之后立刻补发一份视图；这里如果
+          // 房间已经有局面（重连场景），直接强刷一次，别被序号去重挡掉
+          if (room.state) syncFromView({ seq: undefined, view: room.state, roster: netRoster }, true);
+        },
+        view: function (e) { syncFromView(e); },
+        netEvent: function (msg) {
+          if (msg.kind === 'reject') {
+            netBusy = false;
+            setSelInfo('✗ ' + msg.reason, 'err');
+            sfx('error');
+            updateSelection();
+          }
+        },
+        error: function (e) { showNetError(e); },
+        closed: function () { onNetClosed('房主离开了房间'); }
+      }
+    });
+
+    Net.on('data', function (msg, conn) { if (room) room.onData(msg, conn); });
+    Net.on('disconn', function () { setNetStatus('和房主的连接断了，正在重连…'); });
+    Net.on('reconnecting', function (e) { setNetStatus('重连中…（第 ' + e.attempt + ' 次）'); });
+    Net.on('error', function (e) {
+      // 重连途中报 not-found = 房主已经关掉页面了，别再无限重试
+      if (e.reason === 'not-found') {
+        onNetClosed(joining ? ('房间 ' + c + ' 不存在（房间码对不对？房主还在页面上吗？）')
+                            : '房主已经离开，房间关闭了');
+        return;
+      }
+      showNetError(e);
+      if (e.reason === 'reconnect-failed') onNetClosed('重连失败，请重新加入');
+    });
+
+    Net.join(c, netNick());
+  }
+
+  function netConfig() {
+    return {
+      playerCount: settings.playerCount,
+      landlord: settings.landlord,
+      nonA3ToLast: settings.nonA3ToLast,
+      difficulty: settings.difficulty,
+      speed: settings.speed
+    };
+  }
+
+  function netNick() {
+    var box = $('nickInput');
+    var v = box && box.value ? box.value.trim() : '';
+    if (!v) { try { v = window.localStorage.getItem('chudadi.nick') || ''; } catch (e) {} }
+    if (!v) v = '玩家';
+    try { window.localStorage.setItem('chudadi.nick', v); } catch (e) {}
+    return v.slice(0, 8);
+  }
+
+  function showNetError(e) {
+    var map = {
+      'peerjs-missing': '联机脚本没加载上',
+      'bad-code': '房间码不合法',
+      'not-found': '找不到这个房间',
+      'timeout': '连接超时（可能不在同一个网络 / 房主已关页面）',
+      'unavailable-id': '房间码被占用了，重试一下',
+      'reconnect-failed': '重连失败'
+    };
+    var text = map[e && e.reason] || ('连不上：' + ((e && e.reason) || '未知原因'));
+    setTip('✗ ' + text, 'err');
+    setNetStatus('✗ ' + text);
+    sfx('error');
+  }
+
+  /** 房间没了 / 被踢 / 房主跑了：退回单机，别把人卡在空牌桌上 */
+  function onNetClosed(reason) {
+    mode = 'solo';
+    netIsHost = false;
+    netBusy = false;
+    lastViewSeq = -1;
+    var ov = $('lobbyOverlay'); if (ov) ov.hidden = true;
+    setNetStatus('');
+    setTip('✗ ' + (reason || '已离开房间'), 'err');
+    showStartScreen('');
+  }
+
+  /** 房主：房还没开（在候场界面）时切换人数/玩法 */
+  function lobbySetConfig(patch) {
+    if (room && netIsHost) room.setConfig(patch);
+    renderLobby();
+  }
+
+  function leaveRoom() {
+    if (room) { try { room.close('bye'); } catch (e) {} }
+    room = null;
+    onNetClosed('已离开房间');
+  }
+
+  /* ---------------- 设置局域网/联机相关的界面 ---------------- */
+  function bindNetUI() {
+    // 房间座位数：房主改，改完广播给所有人
+    var modeBox = $('segMode');
+    if (modeBox) {
+      Array.prototype.forEach.call(modeBox.children, function (btn) {
+        btn.addEventListener('click', function () {
+          var v = btn.dataset && btn.dataset.value;
+          if (!v) return;
+          if (!canEditGameSetup()) { refuseSetupEdit(); return; }
+          settings.playerCount = Number(v);
+          settings.landlord = false;      // A3 地主固定 4 人，这边只能选人数
+          saveSettings();
+          applySettingsToUI();
+          lobbySetConfig({ playerCount: settings.playerCount, landlord: false });
+          // 本地按钮态：联机时以房主广播回来的 config 为准，这里先给个即时反馈
+          Array.prototype.forEach.call(modeBox.children, function (b) {
+            b.classList.toggle('active', b === btn);
+          });
+        });
+      });
+    }
+
+    // 昵称：从上次的存下来，省得每次重打
+    var nick = $('nickInput');
+    if (nick) {
+      try {
+        var saved = window.localStorage.getItem('chudadi.nick');
+        if (saved) nick.value = saved;
+      } catch (e) {}
+    }
+
+    var pre = $('joinCode');
+    var fromUrl = codeFromUrl();
+    if (fromUrl && pre) pre.value = fromUrl;
+
+    if ($('btnHost')) $('btnHost').addEventListener('click', function () { netHostGame(); });
+    if ($('btnJoin')) $('btnJoin').addEventListener('click', function () {
+      netJoinGame(($('joinCode') && $('joinCode').value) || '');
+    });
+    if (pre) pre.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); netJoinGame(pre.value); }
+    });
+    if ($('btnLobbyClose')) $('btnLobbyClose').addEventListener('click', function () {
+      var ov = $('lobbyOverlay'); if (ov) ov.hidden = true;
+    });
+    if ($('btnLeave')) $('btnLeave').addEventListener('click', function () { leaveRoom(); });
+    if ($('btnLobbyStart')) $('btnLobbyStart').addEventListener('click', function () { newGame(); });
+    if ($('btnCopyLink')) $('btnCopyLink').addEventListener('click', function () {
+      var linkBox = $('lobbyLink');
+      if (!linkBox) return;
+      linkBox.select();
+      var done = false;
+      try { done = document.execCommand('copy'); } catch (e) {}
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(linkBox.value).then(function () { setSelInfo('链接已复制', 'ok'); },
+          function () { setSelInfo(done ? '链接已复制' : '复制失败，请手动选中复制', done ? 'ok' : 'err'); });
+      } else {
+        setSelInfo(done ? '链接已复制' : '复制失败，请手动选中复制', done ? 'ok' : 'err');
+      }
+    });
+
+    // 顶部「联机」按钮 + 开始界面里的入口，都只是打开联机浮层
+    var openLobby = function () { showLobbyOverlay(); };
+    if ($('btnNet')) $('btnNet').addEventListener('click', openLobby);
+    if ($('btnNetEntry')) $('btnNetEntry').addEventListener('click', openLobby);
+
+    // 有人点了带 ?room= 的链接进来的：直接把房间码填好，省一步
+    if (fromUrl && $('startHint')) {
+      $('startHint').textContent = '房间 ' + fromUrl + '：点「设置」旁边的「联机」→「加入房间」即可进去';
+    }
   }
 
   /* ---------------- 事件绑定 ---------------- */
@@ -1295,12 +1885,25 @@
     });
   }
 
+  /** 联机时，人数 / 玩法这些「这一局怎么打」的设置只有房主能改。
+      客户端点了不能让本地设置和房主那边不一致，否则界面就在骗人。 */
+  function canEditGameSetup() {
+    return !(mode === 'online' && !netIsHost);
+  }
+
+  function refuseSetupEdit() {
+    setTip('人数 / 玩法由房主决定，你这边先跟着房主走', 'err');
+    sfx('error');
+    applySettingsToUI();
+  }
+
   /** 「游戏人数」三选一：A3 地主 = 4 人局 + ♠A/♠3 暗队 */
   function bindPlayerMode() {
     var box = $('segPlayers');
     if (!box) return;
     Array.prototype.forEach.call(box.children, function (btn) {
       btn.addEventListener('click', function () {
+        if (!canEditGameSetup()) { refuseSetupEdit(); return; }
         var v = btn.dataset && btn.dataset.value;
         if (v === 'a3') { settings.landlord = true; settings.playerCount = 4; }
         else { settings.landlord = false; settings.playerCount = Number(v); }
@@ -1352,10 +1955,16 @@
       setTip('设置已生效，点「开始游戏」发牌');
     });
     bindPlayerMode();
+    // 联机时电脑难度由房主决定（AI 跑在房主那台设备上），
+    // 客户端改了也不会生效，所以直接拦住，别让设置面板骗人
     bindSegment('segDifficulty', 'difficulty', function () {
+      if (!canEditGameSetup()) { refuseSetupEdit(); return; }
+      if (mode === 'online' && netIsHost) lobbySetConfig({ difficulty: settings.difficulty });
       setTip('难度已切换为：' + { easy: '简单', normal: '普通', hard: '困难' }[settings.difficulty]);
     });
     bindSegment('segSpeed', 'speed', function () {
+      if (!canEditGameSetup()) { refuseSetupEdit(); return; }
+      if (mode === 'online' && netIsHost) lobbySetConfig({ speed: settings.speed });
       setTip('电脑每步目标时长：' + SPEED[settings.speed] + ' ms');
     });
     bindSegment('segDimUnplayable', 'dimUnplayable', function () {
@@ -1411,13 +2020,16 @@
   // 页面切回时，如果电脑回合没有待执行的定时器，补一次调度，避免卡住
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) return;
-    if (state && state.phase === 'playing' && state.turn !== 0 && !botTimerPending) scheduleBots();
+    if (mode === 'solo' && state && state.phase === 'playing' && !isMyTurn() && !botTimerPending) scheduleBots();
+    // 联机：手机切后台再回来连接可能已经挂了，催一次重连
+    if (mode === 'online' && !netIsHost) Net.poke && Net.poke();
   });
 
   /* ---------------- 启动 ---------------- */
   applySettingsToUI();
   applySound();
   bind();
+  bindNetUI();
   // 刚进页面不自动发牌：停在「未开局」，等玩家点正中的「开始游戏」
   showStartScreen('');
 
@@ -1427,6 +2039,14 @@
     newGame: newGame,
     legal: function () { return currentLegal(); },
     flags: debugFlags,
-    render: renderAll
+    render: renderAll,
+    // 联机调试用
+    get mode() { return mode; },
+    get room() { return room; },
+    get seat() { return myIdx(); },
+    get code() { return netCode; },
+    host: netHostGame,
+    join: netJoinGame,
+    leave: leaveRoom
   };
 })();
