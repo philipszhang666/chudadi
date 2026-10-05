@@ -699,6 +699,13 @@
   function updateSelection() {
     if (!state) return;                 // 未开局：没有任何可操作的东西
     var myTurn = isMyTurn();
+
+    /* 保险：轮到我时 busy 必须复位。
+       busy 只服务于「本地跑 AI」，而它靠 later() 排队复位，一旦队列被
+       clearTimers() 作废就会永远留在 true —— 那会让出牌按钮点了没反应。
+       轮到真人出牌说明本地已经没有 AI 在跑了，这里直接清掉。 */
+    if (myTurn && mode === 'solo') busy = false;
+
     var legal = currentLegal();
     var cards = selectedCards();
 
@@ -886,28 +893,60 @@
     return { busy: busy, botTimerPending: botTimerPending, gameSeq: gameSeq };
   }
 
+  /**
+   * 联机时把手上的这一步交出去。
+   *
+   * 关键区别（这里出过一个致命 bug）：
+   *   · 客户端 —— 本地没有权威 state，只能把「我想出这几张」发给房主，
+   *               等房主校验后广播视图回来。这期间锁住按钮（netBusy）。
+   *   · 房主   —— 权威 state 就在自己手里，**不能走 Net.send**！
+   *               那等于把动作发给自己，然后永远等一条不会回来的确认，
+   *               表现就是「点了出牌没反应」（第一手之后全卡死）。
+   *               房主直接调 room.applyAction 落到 state 上。
+   */
+  function submitOnlineAction(action, cards) {
+    netBusy = true;
+    localActionSeq++;
+    updateSelection();
+
+    if (netIsHost) {
+      // 房主：直接落地
+      var res = room.applyAction(myIdx(), action, cards);
+      netBusy = false;
+      if (!res || !res.ok) {
+        setSelInfo('✗ ' + ((res && res.reason) || '出牌失败'), 'err');
+        sfx('error');
+        updateSelection();
+        return false;
+      }
+      selected = {};
+      updateSelection();
+      return true;
+    }
+
+    // 客户端：发给房主，等广播回来解锁（syncFromView 里复位 netBusy）
+    Net.send({ type: ProtocolNS.C2H.ACTION, seq: localActionSeq, action: action, cards: cards });
+    selected = {};
+    updateSelection();
+    setSelInfo('已发出，等房主确认…');
+    return true;
+  }
+
   function doPlay() {
     // 这些守卫以前是静默 return —— 一旦有别的地方把它们置住，
     // 用户看到的就是「点了没反应」，连个提示都没有。现在都会说话。
     if (!state || state.phase !== 'playing') return;
-    if (busy || netBusy) { setSelInfo('等上一步处理完再出牌…'); return; }
+    // busy 只表示「本地正在跑 AI」，那是单机才有的事。
+    // 联机时 AI 在房主的 room 里跑，跟这个标志无关 ——
+    // 而且它会被 clearTimers() 的局号校验卡在 true（排队的回调作废后没人复位），
+    // 一卡住就表现成「点出牌没反应」。所以联机时不看它，只看 netBusy。
+    if ((mode === 'solo' && busy) || netBusy) { setSelInfo('等上一步处理完再出牌…'); return; }
     if (!isMyTurn()) { setSelInfo('还没轮到你出牌'); return; }
     var cards = selectedCards();
     if (!cards.length) { setSelInfo('先点牌选中要出的牌'); return; }
 
     if (mode === 'online') {
-      // 联机：本地不落地，只把「我想出这几张」发给房主，
-      // 由房主用同一份 game.js 校验后再广播回来。乐观地先取消选中，
-      // 手感更跟手；被拒的话会弹提示并恢复。
-      var ids = cards.map(function (c) { return c.id; });
-      netBusy = true;
-      // 只有一个动作序号，别再造第二个名字：
-      // syncFromView 解锁时要拿它和我发出的这一手比对
-      localActionSeq++;
-      Net.send({ type: ProtocolNS.C2H.ACTION, seq: localActionSeq, action: 'play', cards: ids });
-      selected = {};
-      updateSelection();
-      setSelInfo('已发出，等房主确认…');
+      submitOnlineAction('play', cards.map(function (c) { return c.id; }));
       return;
     }
 
@@ -919,17 +958,12 @@
 
   function doPass() {
     if (!state || state.phase !== 'playing') return;
-    if (busy || netBusy) { setSelInfo('等上一步处理完再操作…'); return; }
+    if ((mode === 'solo' && busy) || netBusy) { setSelInfo('等上一步处理完再操作…'); return; }
     if (!isMyTurn()) { setSelInfo('还没轮到你'); return; }
     if (state.current === null) { setSelInfo('✗ 领出时不能过牌，必须出牌', 'err'); sfx('error'); return; }
 
     if (mode === 'online') {
-      netBusy = true;
-      localActionSeq++;
-      Net.send({ type: ProtocolNS.C2H.ACTION, seq: localActionSeq, action: 'pass' });
-      selected = {};
-      updateSelection();
-      setSelInfo('已发出，等房主确认…');
+      submitOnlineAction('pass', null);
       return;
     }
 
@@ -2184,13 +2218,21 @@
     get state() { return state; },
     newGame: newGame,
     legal: function () { return currentLegal(); },
-    flags: debugFlags,
     render: renderAll,
     // 联机调试用
     get mode() { return mode; },
     get room() { return room; },
     get seat() { return myIdx(); },
     get code() { return netCode; },
+    // 出牌链路的关键标志位（"点了没反应"类问题全靠它定位）
+    get flags() {
+      return {
+        busy: busy, netBusy: netBusy, netIsHost: netIsHost,
+        myTurn: isMyTurn(), localActionSeq: localActionSeq,
+        lastViewSeq: lastViewSeq,
+        btnPlayDisabled: $('btnPlay') ? $('btnPlay').disabled : null
+      };
+    },
     host: netHostGame,
     join: netJoinGame,
     leave: leaveRoom

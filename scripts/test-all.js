@@ -30,7 +30,7 @@ var SYNTAX_FILES = [
   'js/protocol.js', 'js/net.js', 'js/room.js', 'js/ui.js', 'js/ai_v1.js',
   'js/cards.js', 'js/game.js', 'js/ai.js', 'js/sound.js',
   'server.js', 'scripts/test-room.js', 'scripts/check-dom.js',
-  'scripts/check-undeclared.js'
+  'scripts/check-undeclared.js', 'scripts/test-ui-online.js', 'scripts/dom-shim.js'
 ];
 
 SYNTAX_FILES.forEach(function (f) {
@@ -87,6 +87,16 @@ console.log('联机逻辑测试：信息隐藏 / 权威校验 / 整局跑通');
 console.log('='.repeat(56));
 
 if (runInProcess('./test-room.js') !== 0) failed++;
+
+/* ---------------- 4. 界面层 ----------------
+   用最小 DOM 桩把真正的 ui.js 跑起来，真的去「点」出牌按钮。
+   「点出牌没反应」这类 bug 只有这一层抓得到 ——
+   房主把动作发给自己、busy 卡在 true，都是这么发现的。 */
+console.log('\n' + '='.repeat(56));
+console.log('界面测试：真的点「出牌」按钮（房主 / 客户端两种角色）');
+console.log('='.repeat(56));
+
+if (runInProcess('./test-ui-online.js') !== 0) failed++;
 
 console.log('\n' + '='.repeat(56));
 if (failed) {
