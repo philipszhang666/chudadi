@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>锄大地 · 改版（3 最大）</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">锄</span>
+      <div class="brand-txt">
+        <strong>锄大地 · 改版</strong>
+        <small>3 最大 ｜ ♠&gt;♥&gt;♣&gt;♦ ｜ ♦4 先出 ｜ 五张只和五张比</small>
+      </div>
+    </div>
+
+    <div class="topbar-tools">
+      <span class="tool-hint" id="setupSummary">4 人 · 普通</span>
+      <button id="btnSettings" class="btn ghost">⚙ 设置</button>
+      <button id="btnNew" class="btn ghost"
+              title="结束当前这局，回到开始界面（再点正中的「开始游戏」才发牌）">重新开局</button>
+      <button id="btnRules" class="btn ghost">规则</button>
+    </div>
+  </header>
+
+  <!-- 牌桌：无边框。对手坐四角，你在下方正中 -->
+  <main class="table" id="table">
+
+    <div class="seat-row">
+      <!-- 三个对手，用几个显示几个 -->
+      <section class="seat" id="seat-tl"></section>
+      <section class="seat" id="seat-tr"></section>
+
+      <!-- 中央出牌区 -->
+      <div class="center" id="center">
+        <div class="center-head">
+          <span class="turn-tag" id="turnTag">—</span>
+          <span class="round-tag" id="roundTag">第 1 墩</span>
+        </div>
+        <div class="center-cards" id="centerCards"></div>
+        <div class="trick-log" id="trickLog" hidden></div>
+      </div>
+
+      <section class="seat" id="seat-bl"></section>
+      <section class="seat" id="seat-br"></section>
+    </div>
+
+    <!-- 你的座位：下方正中 -->
+    <section class="seat seat-me" id="seat-me">
+      <div class="pname">
+        <span class="dot"></span>
+        <span>你</span>
+        <span class="pc" id="myCountInline">13 张</span>
+      </div>
+      <div class="pinfo" id="mySeatInfo"></div>
+    </section>
+
+  </main>
+
+  <!-- 我的区域 -->
+  <footer class="me">
+    <div class="me-head">
+      <span class="me-name">你的手牌</span>
+      <span class="me-count" id="myCount">13 张</span>
+      <span class="badge" id="myBadge" hidden>报牌！</span>
+      <span class="spacer"></span>
+      <span class="tip" id="tip"></span>
+    </div>
+
+    <div class="hand" id="hand"></div>
+
+    <div class="actions">
+      <button id="btnPass" class="btn pass">过牌</button>
+      <button id="btnPlay" class="btn primary" disabled>出牌</button>
+      <button id="btnHint" class="btn ghost">提示</button>
+      <button id="btnGroup" class="btn ghost"
+              title="捡牌：把选中的牌一起挪到手牌最右边并取消选中（别人出牌时也能用）；没选牌时点一下恢复默认排序">组合</button>
+      <button id="btnClear" class="btn ghost">取消选择</button>
+      <span class="sel-info" id="selInfo">请选择要出的牌</span>
+    </div>
+  </footer>
+
+  <!-- 未开局（刚进页面 / 上一局结束后）：正中间的「开始游戏」。
+       只有点了它才会发牌 —— 不点就一直停在牌桌上，电脑也不会自己出牌。 -->
+  <div class="start-screen" id="startScreen" hidden>
+    <div class="start-box">
+      <p class="start-title" id="startTitle">准备开始</p>
+      <button id="btnStart" class="btn primary start-btn">开始游戏</button>
+      <p class="start-record" id="startRecord">你 赢 0 局 · 输 0 局（共 0 局）</p>
+      <p class="start-hint" id="startHint">点「开始游戏」发牌，持 ♦4 的人先出</p>
+    </div>
+  </div>
+
+</div>
+
+<!-- 设置浮层 -->
+<div class="overlay" id="settingsOverlay" hidden>
+  <div class="dialog">
+    <h2>设置</h2>
+    <div class="set-list">
+
+      <div class="set-row">
+        <div class="set-label">
+          <b>游戏人数</b>
+          <small>3 人局：52 张按 17 张发，余下 1 张随机补给其中一人（18/17/17）；<br>
+                 A3 地主：4 人局，持 ♠A 与 ♠3 者暗中一队（找朋友）</small>
+        </div>
+        <div class="segmented" id="segPlayers">
+          <button class="seg" data-value="3">3 人</button>
+          <button class="seg" data-value="4">4 人</button>
+          <button class="seg" data-value="a3">A3 地主</button>
+        </div>
+      </div>
+
+      <div class="set-row">
+        <div class="set-label">
+          <b>非 A3 打到末游</b>
+          <small>仅对 3 人 / 4 人局生效（A3 地主不受影响）。打开后不再「头游即结束」，而是打到你的名次定下来：
+                你<b>头游</b>＝胜；你<b>第 2 名</b>＝平局；有<b>两名其他人先出完</b>（你最好只能第 3 名）＝负</small>
+        </div>
+        <div class="segmented" id="segNonA3ToLast">
+          <button class="seg" data-value="off">关</button>
+          <button class="seg" data-value="on">开</button>
+        </div>
+      </div>
+
+      <div class="set-row">
+        <div class="set-label">
+          <b>电脑难度</b>
+          <small>简单=贪心；普通=记牌+手牌结构+该不该压；困难=ISMCTS 搜索（更强但更慢）</small>
+        </div>
+        <div class="segmented" id="segDifficulty">
+          <button class="seg" data-value="easy">简单</button>
+          <button class="seg" data-value="normal">普通</button>
+          <button class="seg" data-value="hard">困难</button>
+        </div>
+      </div>
+
+      <div class="set-row">
+        <div class="set-label">
+          <b>电脑思考速度</b>
+          <small>每步目标时长：慢 1200 / 普通 800 / 快 400 ms。先算再补时，算得慢就不再等</small>
+        </div>
+        <div class="segmented" id="segSpeed">
+          <button class="seg" data-value="slow">慢</button>
+          <button class="seg" data-value="normal">普通</button>
+          <button class="seg" data-value="fast">快</button>
+        </div>
+      </div>
+
+      <div class="set-row">
+        <div class="set-label">
+          <b>标注不能出的牌</b>
+          <small>默认关闭：手牌不做任何提示。<b>选牌不设限</b>——想出哪几张就选哪几张，
+                点「出牌」时才判断合法性，不合法会在底部弹红色警告说明原因。<br>
+                打开后，当前不参与任何可出牌型的牌会被灰色蒙层压暗。这只是视觉提示，
+                压暗的牌照样能选、能出（牌面本身始终不透明）</small>
+        </div>
+        <div class="segmented" id="segDimUnplayable">
+          <button class="seg" data-value="off">不提示</button>
+          <button class="seg" data-value="on">灰显</button>
+        </div>
+      </div>
+
+      <div class="set-row">
+        <div class="set-label">
+          <b>音效</b>
+          <small>选牌、出牌、轮到你了、报牌、胜负都有提示音。<br>
+                音效用 Web Audio 实时合成，不加载任何音频文件</small>
+        </div>
+        <div class="segmented" id="segSound">
+          <button class="seg" data-value="off">关</button>
+          <button class="seg" data-value="low">轻</button>
+          <button class="seg" data-value="normal">正常</button>
+          <button class="seg" data-value="high">响</button>
+        </div>
+      </div>
+
+    </div>
+
+    <p class="set-note">改动「游戏人数」会结束当前这局并回到开始界面（不自动发牌，要自己点正中的「开始游戏」）；
+      「以当前设置重新开局」同理，也是回到开始界面而不是直接开牌。其他设置立即生效，不会中断当前牌局。</p>
+
+    <div class="dialog-actions">
+      <button id="btnApplyNew" class="btn ghost">以当前设置重新开局</button>
+      <button id="btnCloseSettings" class="btn primary">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 结算浮层 -->
+<div class="overlay" id="overlay" hidden>
+  <div class="dialog">
+    <h2 id="resultTitle">本局结束</h2>
+    <div id="resultBody" class="result-body"></div>
+    <div class="dialog-actions">
+      <button id="btnAgain" class="btn primary">回到牌桌</button>
+    </div>
+  </div>
+</div>
+
+<!-- 规则浮层 -->
+<div class="overlay" id="rulesOverlay" hidden>
+  <div class="dialog wide">
+    <h2>改版规则</h2>
+    <div class="rules-body">
+      <h3>点数大小</h3>
+      <p class="rank-line">3 &gt; 2 &gt; A &gt; K &gt; Q &gt; J &gt; 10 &gt; 9 &gt; 8 &gt; 7 &gt; 6 &gt; 5 &gt; 4</p>
+      <h3>花色大小</h3>
+      <p class="rank-line">♠ 黑桃 &gt; ♥ 红桃 &gt; ♣ 梅花 &gt; ♦ 方块</p>
+      <p>点数相同时比花色，所以 <b>♦4 是全场最小的牌</b>。</p>
+      <h3>先出</h3>
+      <p>持有 <b>♦4</b> 的人先出牌，且<b>本局第一手必须包含 ♦4</b>（可以是单张、对子、三条或五张牌型里带它）。</p>
+      <h3>牌型</h3>
+      <ul>
+        <li><b>单张</b>、<b>对子</b>、<b>三条</b></li>
+        <li><b>五张牌型</b>：同花顺 &gt; 四条 &gt; 葫芦 &gt; 同花 &gt; 顺子</li>
+        <li>四条指「四张同点 + 任意 1 张」（<b>四带一</b>），共五张；它<b>压得过葫芦</b>（三张同点 + 一对，即<b>三带二</b>），
+            四条带哪张脚牌都一样大</li>
+        <li><b>只能同张数互比</b>：五张牌型只能和五张比较。<br>
+            别人打三张，你不能用「三带二」之类的五张去压；单张、对子、三条也各自只和同张数比。</li>
+        <li>五张之中先比牌型级别，级别相同再比牌力；牌力也相同（比如双方都是 5-6-7-8-9）时，<b>比最大牌的花色</b>。</li>
+      </ul>
+      <h3>顺子</h3>
+      <p>按线性序列 <b>2 3 4 5 6 7 8 9 10 J Q K A</b> 取连续五张：</p>
+      <ul>
+        <li><b>最大顺子：10-J-Q-K-A</b></li>
+        <li><b>最小顺子：A-2-3-4-5</b>（特例）</li>
+        <li>没有绕圈组合，所以 <code>J-Q-K-A-2</code>、<code>Q-K-A-2-3</code> 都不算顺子</li>
+        <li>同花顺同理。</li>
+      </ul>
+      <h3>出牌流程</h3>
+      <p>轮流出牌，压不过或不想出可以过牌。其余三家都过牌后，最后出牌的人重新领出任意牌型。先出完手牌者获胜。</p>
+      <p><b>选牌不设限</b>：手牌想出哪几张就选哪几张（暂时出不掉的也能选），
+        点 <b>出牌</b> 时才判断合不合法，不合法会在底部弹红色警告说明原因。</p>
+      <p>选牌可以<b>单击</b>，也可以<b>按住鼠标左键在牌上划过去</b>一次选一串：
+        从没选中的牌开始划 = 划过的全选中；从已选中的牌开始划 = 划过的全取消。</p>
+      <h3>捡牌（组合）</h3>
+      <p>选中几张牌后点 <b>组合</b>，这几张牌会一起挪到<b>手牌最右边</b>，其余牌保持原来的大小顺序，
+        同时<b>自动取消选中</b>（捡过去的牌会自己降下去），方便把打算留着的牌拎出来看。</p>
+      <p><b>别人出牌的时候也能选牌、用 组合</b>，只是这期间 出牌 / 过牌 / 提示 是禁用的。</p>
+      <p><b>没选牌时点 组合 = 恢复默认排序</b>；开新一局会自动恢复默认排序。</p>
+      <h3>战绩（只记输赢局数）</h3>
+      <p>经典玩法：每局<b>头游赢 1 局</b>，其余各家各<b>输 1 局</b>；A3 地主按下面规则记<b>胜 / 平 / 负</b>。</p>
+      <p>开启设置里的「<b>非 A3 打到末游</b>」后：3 人 / 4 人局不再「头游即结束」，而是接着打到你的名次定下来——你<b>头游</b>＝胜，你<b>第 2 名</b>＝平，其余＝负（已有两名其他人先出完、你最好只能第 3 名时即判负收场）。此设置对 A3 地主无效。</p>
+      <h3>A3 地主（找朋友）</h3>
+      <ul>
+        <li>仅 4 人局。发牌后，持 <b>♠A</b> 与持 <b>♠3</b> 的两人<b>暗中成一队</b>（地主队），另外两家为农民队。</li>
+        <li><b>身份保密</b>：开局谁也不知道队友是谁；谁先亮出自己那张（♠A 或 ♠3），全场就知道<b>出牌人是地主队</b>，
+            而握着另一张的人自然认出队友；两张都亮出后，地主队就全公开了。</li>
+        <li><b>不因「头游」就结束，但胜负一定就收</b>：出完的人按先后排名次；只要<b>前两名同属一队</b>、或<b>独地主本人出完</b>（名次已定），当场结算；否则继续打，直到只剩最后一名（末游）。没打完的按剩余张数从少到多补名次。</li>
+        <li>按<b>名次之和</b>判胜负：<b>≤4 胜、=5 平、≥6 负</b>（两队各自看自家两人的名次之和）。</li>
+        <li>若 <b>一人独拿 ♠A♠3</b>：他第 1 名胜、第 2 名平、第 3/4 名负，其余三家为反方。</li>
+        <li>电脑<b>会配合队友</b>（不顶队友、喂单张、抢回领出权后再喂），且只凭公开信息判断队友，<b>不会偷看</b>身份。</li>
+      </ul>
+      <p>开始界面（正中的「开始游戏」按钮下面）随时能看到你自己的输赢局数；
+        每局结束的结算表只列各家<b>名次 / 剩余张数 / 剩余的具体牌</b>，下面一行是你的累计输赢局数。</p>
+      <p>战绩只保存在本次打开页面期间——刷新或关掉页面就重新从 0 开始算。</p>
+    </div>
+    <div class="dialog-actions">
+      <button id="btnCloseRules" class="btn primary">知道了</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/cards.js"></script>
+<script src="js/game.js"></script>
+<script src="js/determinize.js"></script>
+<script src="js/endgame.js"></script>
+<script src="js/mcts.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>

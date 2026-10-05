@@ -1,0 +1,4 @@
+# 内部工具 / 检查点，不部署
+.agent/
+node_modules/
+*.log
