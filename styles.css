@@ -634,8 +634,10 @@ html, body {
   .table { margin: 4px 10px 2px; gap: 4px; }
   .seat-row {
     grid-template-columns: minmax(110px, 1fr) minmax(0, 1.4fr) minmax(110px, 1fr);
-    gap: 4px 10px;
+    gap: 6px 12px;
   }
+  /* 中央出牌区跨两行：竖向可用高度翻倍，内容不再溢出、不再压到下方「你」的座位 */
+  #center { grid-area: 1 / 2 / 3 / 3; }
 
   /* 座位压紧 */
   .seat { gap: 2px; }
@@ -658,7 +660,8 @@ html, body {
   .card.mini .corner .s { font-size: 9px; }
 
   /* 中央出牌区 */
-  .center { gap: 4px; padding: 2px; }
+  .center { gap: 8px; padding: 3px; }
+  .center-head { gap: 8px; }
   .turn-tag { font-size: 11px; padding: 2px 10px; }
   .round-tag { font-size: 10px; }
   .center-cards { gap: 4px; min-height: calc(var(--card-h) + 4px); }
