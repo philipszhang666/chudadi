@@ -886,9 +886,13 @@
   }
 
   function doPlay() {
-    if (!state || busy || netBusy || state.phase !== 'playing' || !isMyTurn()) return;
+    // 这些守卫以前是静默 return —— 一旦有别的地方把它们置住，
+    // 用户看到的就是「点了没反应」，连个提示都没有。现在都会说话。
+    if (!state || state.phase !== 'playing') return;
+    if (busy || netBusy) { setSelInfo('等上一步处理完再出牌…'); return; }
+    if (!isMyTurn()) { setSelInfo('还没轮到你出牌'); return; }
     var cards = selectedCards();
-    if (!cards.length) return;
+    if (!cards.length) { setSelInfo('先点牌选中要出的牌'); return; }
 
     if (mode === 'online') {
       // 联机：本地不落地，只把「我想出这几张」发给房主，
@@ -896,8 +900,10 @@
       // 手感更跟手；被拒的话会弹提示并恢复。
       var ids = cards.map(function (c) { return c.id; });
       netBusy = true;
-      lastActionSeq = ++localActionSeq;
-      Net.send({ type: ProtocolNS.C2H.ACTION, seq: lastActionSeq, action: 'play', cards: ids });
+      // 只有一个动作序号，别再造第二个名字：
+      // syncFromView 解锁时要拿它和我发出的这一手比对
+      localActionSeq++;
+      Net.send({ type: ProtocolNS.C2H.ACTION, seq: localActionSeq, action: 'play', cards: ids });
       selected = {};
       updateSelection();
       setSelInfo('已发出，等房主确认…');
@@ -911,13 +917,15 @@
   }
 
   function doPass() {
-    if (!state || busy || netBusy || state.phase !== 'playing' || !isMyTurn()) return;
+    if (!state || state.phase !== 'playing') return;
+    if (busy || netBusy) { setSelInfo('等上一步处理完再操作…'); return; }
+    if (!isMyTurn()) { setSelInfo('还没轮到你'); return; }
     if (state.current === null) { setSelInfo('✗ 领出时不能过牌，必须出牌', 'err'); sfx('error'); return; }
 
     if (mode === 'online') {
       netBusy = true;
-      lastActionSeq = ++localActionSeq;
-      Net.send({ type: ProtocolNS.C2H.ACTION, seq: lastActionSeq, action: 'pass' });
+      localActionSeq++;
+      Net.send({ type: ProtocolNS.C2H.ACTION, seq: localActionSeq, action: 'pass' });
       selected = {};
       updateSelection();
       setSelInfo('已发出，等房主确认…');

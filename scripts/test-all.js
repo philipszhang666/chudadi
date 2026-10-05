@@ -29,7 +29,8 @@ console.log('语法检查（vm 编译，不执行）：');
 var SYNTAX_FILES = [
   'js/protocol.js', 'js/net.js', 'js/room.js', 'js/ui.js', 'js/ai_v1.js',
   'js/cards.js', 'js/game.js', 'js/ai.js', 'js/sound.js',
-  'server.js', 'scripts/test-room.js', 'scripts/check-dom.js'
+  'server.js', 'scripts/test-room.js', 'scripts/check-dom.js',
+  'scripts/check-undeclared.js'
 ];
 
 SYNTAX_FILES.forEach(function (f) {
@@ -73,6 +74,12 @@ function runInProcess(relPath) {
 }
 
 if (runInProcess('./check-dom.js') !== 0) failed++;
+
+/* 用了但从没声明的变量。这一项是补上来的：ui.js 里曾出现
+   `lastActionSeq = ++localActionSeq;`（lastActionSeq 从未声明），
+   点「出牌」按钮时抛 ReferenceError，界面上毫无反应。
+   语法检查、DOM 检查、单元测试当时全都没抓到它。 */
+if (runInProcess('./check-undeclared.js') !== 0) failed++;
 
 /* ---------------- 3. 联机逻辑测试 ---------------- */
 console.log('\n' + '='.repeat(56));
