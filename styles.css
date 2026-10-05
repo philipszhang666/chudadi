@@ -670,13 +670,17 @@ html, body {
   .tl-label { font-size: 9.5px; }
 
   /* 底部：手牌 + 按钮 */
-  .me { padding: 2px 12px 4px; }
+  .me { padding: 2px 12px 10px; }
   .me-head { font-size: 11px; padding: 0 4px 1px; }
-  .hand { min-height: calc(var(--card-h) + 8px); padding: 4px 8px 0; }
-  .hand .card { margin-left: calc(var(--card-w) * -0.42); }
-  .hand .card:hover { transform: translateY(-5px); }
-  .hand .card.sel { transform: translateY(-12px); }
-  .hand .card.sel:hover { transform: translateY(-12px); }
-  .actions { gap: 6px; padding-top: 3px; }
-  .sel-info { font-size: 11px; margin-left: 4px; }
+  /* 手牌单独放大：手指好点；叠得松一点，露出更大可点区域 */
+  .hand { min-height: calc(19vh + 6px); padding: 4px 8px 2px; }
+  .hand .card { --card-h: 19vh; --card-w: 13.4vh; margin-left: calc(var(--card-w) * -0.30); }
+  .hand .card .corner .r { font-size: 17px; }
+  .hand .card .corner .s { font-size: 13px; }
+  .hand .card:hover { transform: translateY(-6px); }
+  .hand .card.sel { transform: translateY(-14px); }
+  .hand .card.sel:hover { transform: translateY(-14px); }
+  /* 和下方按钮拉开距离 */
+  .actions { gap: 8px; padding-top: 14px; }
+  .sel-info { font-size: 11px; margin-left: 6px; }
 }
