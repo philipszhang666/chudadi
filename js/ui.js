@@ -1484,6 +1484,7 @@
     var ov = $('overlay');
     if (ov) ov.hidden = true;
     if ($('startScreen')) $('startScreen').hidden = true;   // 收起「开始游戏」
+    if ($('lobbyOverlay')) $('lobbyOverlay').hidden = true; // 收起候场大厅，别挡住牌桌 / 结算
     if ($('btnGroup')) $('btnGroup').disabled = false;      // 未开局时禁用过，这里放开
     if ($('center')) $('center').classList.remove('idle');  // 恢复中央的轮次/说明
   }
@@ -1585,6 +1586,7 @@
 
     if (incoming.phase === 'over') {
       // 结算：房主已经算好了，客户端只是把结果画出来
+      if ($('lobbyOverlay')) $('lobbyOverlay').hidden = true;   // 别让候场大厅压住结算
       renderAll();
       if (!wasOver) scheduleResult();
       return;
@@ -2161,7 +2163,11 @@
       setTip('点「开始游戏」发牌');
     });
     // 结算浮层的按钮只负责回到牌桌，真正开始要按正中的「开始游戏」
-    $('btnAgain').addEventListener('click', function () { showStartScreen(); });
+    $('btnAgain').addEventListener('click', function () {
+      // 客户端：收起结算浮层就行（开新局是房主的事），别卡在结算上
+      if (mode === 'online' && !netIsHost) { var ov = $('overlay'); if (ov) ov.hidden = true; return; }
+      showStartScreen();
+    });
     // 只有这一个地方会发牌：正中的「开始游戏」
     if ($('btnStart')) $('btnStart').addEventListener('click', function () { newGame(); });
 
