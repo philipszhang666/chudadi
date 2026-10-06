@@ -31,6 +31,8 @@
   var lastViewSeq = -1;
   var localActionSeq = 0;       // 联机：我给房主发出去的动作序号
   var netStatus = '';           // 顶栏/底部显示的网络状态文字
+  var lastMsgAt = 0;            // 最近一次收到房主消息的时间（自动追同步用）
+  var lastResyncReq = 0;        // 最近一次主动请求同步的时间（限流）
 
   /** 我的座位号。单机时人类恒为 0，联机时是房主分配的座位 */
   function myIdx() { return mode === 'online' ? netSeat : 0; }
@@ -1557,6 +1559,7 @@
   function syncFromView(e, force) {
     var incoming = e && e.view;
     if (!incoming) return;
+    lastMsgAt = Date.now();    // 收到一帧 = 连接还活着（自动追同步用）
     if (!force && e.seq !== undefined) {
       // 序号倒退 = 房主重开了一局（房间把 seq 归零）却没走候场大厅。
       // 以前这里一律当成「旧消息」丢掉，于是客户端会一直卡在上一局的
@@ -1623,6 +1626,7 @@
   /** 联机：房间名单 / 配置变了 */
   function syncLobby(e) {
     if (e && e.roster) netRoster = e.roster;
+    lastMsgAt = Date.now();    // 收到房主消息 = 连接还活着
     // 回到候场：下一局的视图序号会从 0 重新开始，去重基准也要跟着归零，
     // 否则新一局的视图会被当成旧消息全部丢掉
     if (e && e.phase === 'lobby') lastViewSeq = -1;
@@ -1708,6 +1712,7 @@
     netRoster = [];
     lastViewSeq = -1;
     showLobbyOverlay();
+    setOnlineChrome(true);
 
     room = Room.create({
       net: Net,
@@ -1779,6 +1784,7 @@
     trace('开始加入房间 ' + c);
     setNetStatus('正在加入房间 ' + c + ' …');
     showLobbyOverlay();
+    setOnlineChrome(true);
 
     room = Room.create({
       net: Net,
@@ -1787,6 +1793,7 @@
         lobby: function (e) { syncLobby(e); },
         welcome: function (e) {
           netSeat = e.seat;
+          lastMsgAt = Date.now();
           netCode = e.code || c;
           if (e.config) { Object.keys(e.config).forEach(function (k) { settings[k] = e.config[k]; }); }
           if (e.roster) netRoster = e.roster;
@@ -1900,6 +1907,7 @@
     netIsHost = false;
     netBusy = false;
     lastViewSeq = -1;
+    setOnlineChrome(false);
     var ov = $('lobbyOverlay'); if (ov) ov.hidden = true;
     setNetStatus('');
     refreshModeAvailability();   // 回到单机：清掉灰显
@@ -1917,6 +1925,37 @@
     if (room) { try { room.close('bye'); } catch (e) {} }
     room = null;
     onNetClosed('已离开房间');
+  }
+
+  /** 联机：显隐「同步对局」按钮（单机时不需要） */
+  function setOnlineChrome(on) {
+    var b = $('btnResync');
+    if (b) b.hidden = !on;
+  }
+
+  /**
+   * 联机「重新同步对局」：手动按钮 / 自动追同步都走这里。
+   *   客户端 —— 给房主发一条 RESYNC，房主把当前权威局面裁剪一份回过来；
+   *   房主   —— 直接按自己手里的权威局面重画（必要时补出结算浮层）。
+   */
+  function resyncMatch() {
+    if (mode !== 'online' || !room) return;
+    if (netIsHost) {
+      if (room.state) {
+        state = ProtocolNS.makeView(room.state, myIdx());
+        renderAll();
+        if (state.phase === 'over' && $('overlay') && $('overlay').hidden && state.result) showResult();
+      } else {
+        renderLobby();
+      }
+      setTip('已按房主当前局面刷新');
+      return;
+    }
+    lastResyncReq = Date.now();
+    lastMsgAt = Date.now();
+    trace('请求房主重新同步对局');
+    Net.send({ type: ProtocolNS.C2H.RESYNC });
+    setTip('已请房主重新同步…');
   }
 
   /* ---------------- 设置局域网/联机相关的界面 ---------------- */
@@ -2169,6 +2208,8 @@
       showStartScreen();
       setTip('点「开始游戏」发牌');
     });
+    // 顶栏「同步对局」= 联机卡住 / 没弹结算时，把画面重新对齐到房主当前局面
+    if ($('btnResync')) $('btnResync').addEventListener('click', function () { resyncMatch(); });
     // 结算浮层的按钮只负责回到牌桌，真正开始要按正中的「开始游戏」
     $('btnAgain').addEventListener('click', function () {
       // 客户端：收起结算浮层就行（开新局是房主的事），别卡在结算上
@@ -2265,9 +2306,21 @@
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) return;
     if (mode === 'solo' && state && state.phase === 'playing' && !isMyTurn() && !botTimerPending) scheduleBots();
-    // 联机：手机切后台再回来连接可能已经挂了，催一次重连
-    if (mode === 'online' && !netIsHost) Net.poke && Net.poke();
+    // 联机：手机切后台再回来，先催重连，再主动追一帧，别等下次出牌 ——
+    // 否则这几秒里错过的那一帧（比如结算）就永远丢了
+    if (mode === 'online' && !netIsHost) { if (Net.poke) Net.poke(); resyncMatch(); }
   });
+
+  /* 客户端自动追同步：太久没收到房主任何消息，就主动要一帧。
+     手机上连接悄悄半死、只收不到推送时，靠这条自愈，不必手动点「同步」。 */
+  setInterval(function () {
+    if (mode !== 'online' || netIsHost || !room) return;
+    if (!lastMsgAt) return;                        // 还没和房主通上话
+    if (state && state.phase === 'over') return;    // 已经结算，别打扰
+    if (Date.now() - lastMsgAt < 8000) return;      // 8 秒内有消息 → 正常
+    if (Date.now() - lastResyncReq < 5000) return;  // 限流：最多 5 秒一次
+    resyncMatch();
+  }, 4000);
 
   /* ---------------- 启动 ---------------- */
   applySettingsToUI();

@@ -34,6 +34,7 @@ var ProtocolNS = (function () {
     LOBBY_SET: 'lobbySet',  // { config }                     房主改设置（仅房主）
     START: 'start',         //                                房主发牌开局
     ACTION: 'action',       // { seq, action:'play'|'pass', cards:[id] }
+    RESYNC: 'resync',       //                                客户端请房主重发当前局面
     BYE: 'bye',             //                                主动离开
     PING: 'ping'            //                                保活
   };

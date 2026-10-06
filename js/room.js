@@ -42,6 +42,7 @@ var Room = (function () {
     var state = null;           // 权威局面（客户端上这里是房主发来的视图）
     var seq = 0;
     var botTimer = null;
+    var overRetryTimer = null;   // 结算那一帧的重发定时器
     var closed = false;
 
     function now() { return (typeof Date !== 'undefined' && Date.now) ? Date.now() : 0; }
@@ -81,8 +82,8 @@ var Room = (function () {
 
     /* ---------------- 视图广播 ---------------- */
 
-    function broadcastView(extra) {
-      if (!state) return;
+    /** 把当前局面裁剪后发到每个座位（seq 自增；房主自己也走 emit，不发网络） */
+    function sendViewNow(extra) {
       seq++;
       roster.forEach(function (r) {
         if (r.isHost) {
@@ -96,6 +97,34 @@ var Room = (function () {
           });
         }
       });
+    }
+
+    function broadcastView(extra) {
+      if (!state) return;
+      sendViewNow(extra);
+      // 结算这一帧多补发几次：手机切后台 / 恰好丢一帧时，客户端错过这一帧
+      // 就再也等不到结算了（表现：卡在最后一帧、不弹结算）。补发的视图靠
+      // seq 递增才会被客户端收下（见 ui.js 的 syncFromView 去重逻辑）。
+      if (state.phase === P.PHASE.OVER) scheduleOverRetry();
+    }
+
+    var overRetryLeft = 0;
+    /** 结束后再补发两帧（间隔 0.8s）：客户端拿到任意一帧都能把结算画出来 */
+    function scheduleOverRetry() {
+      if (overRetryTimer || overRetryLeft > 0) return;
+      overRetryLeft = 2;
+      overRetryTimer = later(function tick() {
+        overRetryTimer = null;
+        if (closed || !state || state.phase !== P.PHASE.OVER) { overRetryLeft = 0; return; }
+        sendViewNow({ over: true });
+        overRetryLeft--;
+        if (overRetryLeft > 0) overRetryTimer = later(tick, 800);
+      }, 500);
+    }
+
+    function clearOverRetry() {
+      if (overRetryTimer) { clearTimeout(overRetryTimer); overRetryTimer = null; }
+      overRetryLeft = 0;
     }
 
     /* ---------------- 出牌落地 ---------------- */
@@ -292,7 +321,9 @@ var Room = (function () {
       switch (msg.type) {
         case P.C2H.HELLO: handleHello(msg, conn); break;
         case P.C2H.ACTION: handleAction(msg, conn); break;
-        case P.C2H.PING: net.sendToSeat(conn.__seat, { type: P.H2C.PONG }); break;        case P.C2H.BYE: dropSeat(conn.__seat); break;
+        case P.C2H.PING: net.sendToSeat(conn.__seat, { type: P.H2C.PONG }); break;
+        case P.C2H.RESYNC: resyncSeat(conn.__seat); break;
+        case P.C2H.BYE: dropSeat(conn.__seat); break;
         default: break;
       }
     }
@@ -315,6 +346,21 @@ var Room = (function () {
         broadcastView({ offline: seat });
         pump();
       }
+    }
+
+    /** 客户端喊「我跟丢了」：把当前权威局面重新裁剪一份发给他。
+        切后台回来 / 漏了一帧 / 卡住了，靠这条自愈。 */
+    function resyncSeat(seat) {
+      if (seat === undefined || seat === null) return;
+      if (!state) {
+        // 还没开局：把候场名单补发一份
+        net.sendToSeat(seat, { type: P.H2C.LOBBY, lobby: { config: config, roster: rosterView(), phase: phase, code: code } });
+        return;
+      }
+      net.sendToSeat(seat, {
+        type: P.H2C.VIEW, seq: ++seq,
+        view: P.makeView(state, seat), roster: rosterView(), extra: { resync: true }
+      });
     }
 
     /* ---------------- 客户端：处理房主消息 ---------------- */
@@ -401,6 +447,7 @@ var Room = (function () {
       if (humans < 2) return { ok: false, reason: '至少要 2 个人才能开局' };
       if (humans > config.playerCount) return { ok: false, reason: '人比座位多了' };
 
+      clearOverRetry();     // 上一局的结算补发定时器作废，别打进新局
       Object.keys(overrides || {}).forEach(function (k) { config[k] = overrides[k]; });
 
       // 座位可能不是 0..n-1 连续的（有人中途走了），补成连续座位，
@@ -466,12 +513,14 @@ var Room = (function () {
       state = null;
       seq = 0;
       if (botTimer) { clearTimeout(botTimer); botTimer = null; }
+      clearOverRetry();
       sendLobby();
     }
 
     function close(reason) {
       closed = true;
       if (botTimer) { clearTimeout(botTimer); botTimer = null; }
+      clearOverRetry();
       if (isHost) net.broadcast({ type: P.H2C.BYE, reason: reason || 'host-closed' });
       net.close();
       emit('closed', { reason: reason || 'closed' });

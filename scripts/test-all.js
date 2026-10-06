@@ -31,7 +31,7 @@ var SYNTAX_FILES = [
   'js/cards.js', 'js/game.js', 'js/ai.js', 'js/sound.js',
   'server.js', 'scripts/test-room.js', 'scripts/check-dom.js',
   'scripts/check-undeclared.js', 'scripts/test-ui-online.js', 'scripts/dom-shim.js',
-  'scripts/repro-seat.js'
+  'scripts/repro-seat.js', 'scripts/repro-resync.js', 'scripts/repro-botsettle.js'
 ];
 
 SYNTAX_FILES.forEach(function (f) {
@@ -118,3 +118,4 @@ if (failed) {
 console.log('全部无头检查通过 ✓');
 console.log('');
 console.log('（真浏览器端到端：node scripts/e2e-browser.js，需要本机能启动 Chrome）');
+console.log('（另有异步复现脚本单独跑：node scripts/repro-settle.js / repro-botsettle.js / repro-resync.js）');

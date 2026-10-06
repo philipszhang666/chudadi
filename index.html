@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>锄大地 · 改版（3 最大）</title>
-<link rel="stylesheet" href="styles.css?v=12">
+<link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
 
@@ -23,6 +23,8 @@
     <div class="topbar-tools">
       <span class="tool-hint" id="setupSummary">4 人 · 普通</span>
       <span class="net-status" id="netStatus" hidden></span>
+      <button id="btnResync" class="btn ghost" hidden
+              title="联机卡住 / 没弹结算时点一下：把画面重新对齐到房主当前的局面">↻ 同步</button>
       <button id="btnNet" class="btn ghost">🌐 联机</button>
       <button id="btnSettings" class="btn ghost">⚙ 设置</button>
       <button id="btnNew" class="btn ghost"
@@ -354,20 +356,20 @@
 </div>
 
 <!-- 联机依赖：PeerJS（已 vendor 到本地，不依赖 CDN） -->
-<script src="vendor/peerjs.min.js?v=12"></script>
+<script src="vendor/peerjs.min.js?v=13"></script>
 
-<script src="js/cards.js?v=12"></script>
-<script src="js/game.js?v=12"></script>
-<script src="js/determinize.js?v=12"></script>
-<script src="js/endgame.js?v=12"></script>
-<script src="js/mcts.js?v=12"></script>
-<script src="js/ai.js?v=12"></script>
-<script src="js/sound.js?v=12"></script>
+<script src="js/cards.js?v=13"></script>
+<script src="js/game.js?v=13"></script>
+<script src="js/determinize.js?v=13"></script>
+<script src="js/endgame.js?v=13"></script>
+<script src="js/mcts.js?v=13"></script>
+<script src="js/ai.js?v=13"></script>
+<script src="js/sound.js?v=13"></script>
 <!-- 联机三层：裁剪视图 → 传输 → 权威房间。必须在 ui.js 之前加载 -->
-<script src="js/protocol.js?v=12"></script>
-<script src="js/net.js?v=12"></script>
-<script src="js/room.js?v=12"></script>
-<script src="js/ui.js?v=12"></script>
-<script src="js/orientation.js?v=12"></script>
+<script src="js/protocol.js?v=13"></script>
+<script src="js/net.js?v=13"></script>
+<script src="js/room.js?v=13"></script>
+<script src="js/ui.js?v=13"></script>
+<script src="js/orientation.js?v=13"></script>
 </body>
 </html>
