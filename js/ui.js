@@ -1557,9 +1557,15 @@
   function syncFromView(e, force) {
     var incoming = e && e.view;
     if (!incoming) return;
-    if (!force) {
-      if (e.seq !== undefined && e.seq <= lastViewSeq) return;   // 旧消息，丢掉
-      if (e.seq !== undefined) lastViewSeq = e.seq;
+    if (!force && e.seq !== undefined) {
+      // 序号倒退 = 房主重开了一局（房间把 seq 归零）却没走候场大厅。
+      // 以前这里一律当成「旧消息」丢掉，于是客户端会一直卡在上一局的
+      // 最后一帧、再也收不到新一局的任何一帧 —— 表现就是「除房主外的
+      // 真人玩家看不到结算、卡在最后」。这里改成：倒退即视为新一局，
+      // 重置去重基准（只有「同序号重复到达」才丢）。
+      if (e.seq < lastViewSeq) lastViewSeq = -1;
+      else if (e.seq === lastViewSeq) return;
+      lastViewSeq = e.seq;
     }
     if (e.roster) netRoster = e.roster;
 
