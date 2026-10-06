@@ -342,6 +342,14 @@ var Room = (function () {
           phase = (state && state.phase === 'over') ? P.PHASE.OVER : P.PHASE.PLAYING;
           emit('view', { seq: msg.seq, view: state, roster: rosterView(), extra: msg.extra });
           break;
+        case P.H2C.SEAT:
+          // 房主重排了座位：更新本机记的座位号，界面才知道「我现在是几号位」。
+          // 不更新的话，重排后收到的视图 myIndex 会和自己的 netSeat 对不上，
+          // 界面就会把别人当成自己，表现为「轮次对不上、互相干等出牌」。
+          mySeat = msg.seat;
+          net.setMySeat(msg.seat);
+          emit('seat', { seat: msg.seat });
+          break;
         case P.H2C.REJECT:
           emit('error', { reason: msg.reason });
           close();
@@ -398,7 +406,28 @@ var Room = (function () {
       // 座位可能不是 0..n-1 连续的（有人中途走了），补成连续座位，
       // 否则 NAMES_BY_COUNT 那套名字/座位表会对不上
       roster.sort(function (a, b) { return a.seat - b.seat; });
-      roster.forEach(function (r, i) { r.seat = i; });
+      // 重排座位有个关键副作用：net 里的连接、以及每个客户端记着的
+      // 自己的座位号，都还挂在【旧座位】上。只改 roster.seat 而不管这两样：
+      //   · sendToSeat(新座位) 找不到连接 → 那个真人此后再也收不到任何视图
+      //     （表现：卡在最后一帧、看不到结算）；
+      //   · 有的连接反而收到「别的座位」的视图 → 轮次对不上，
+      //     两个玩家互相干等对方出牌。
+      // 所以重排时必须（1）把连接一起挪到新座位；（2）通知被挪动的客户端
+      // 「你现在是 N 号位」。两样都做了，座位号才在房主和客户端之间重新对齐。
+      var seatMoves = [];
+      roster.forEach(function (r, i) {
+        if (r.seat !== i) seatMoves.push({ from: r.seat, to: i, entry: r });
+        r.seat = i;
+      });
+      seatMoves.forEach(function (m) {
+        var c = net.detachSeat(m.from);
+        // conn.__seat 也要改成新座位：handleAction / onDisconn 都靠它
+        // 认「这条连接是几号位」，不改的话客户端出的牌会被算到旧座位上。
+        if (c) { c.__seat = m.to; net.attach(m.to, c); }
+      });
+      seatMoves.forEach(function (m) {
+        if (!m.entry.isHost) net.sendToSeat(m.to, { type: P.H2C.SEAT, seat: m.to });
+      });
 
       state = G.newGame({
         playerCount: config.playerCount,

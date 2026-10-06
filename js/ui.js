@@ -1799,6 +1799,7 @@
           if (room.state) syncFromView({ seq: undefined, view: room.state, roster: netRoster }, true);
         },
         view: function (e) { syncFromView(e); },
+        seat: function (e) { netSeat = e.seat; },
         netEvent: function (msg) {
           if (msg.kind === 'reject') {
             netBusy = false;

@@ -44,6 +44,7 @@ var ProtocolNS = (function () {
     REJECT: 'reject',       // { reason }                     房间满 / 已开局 等
     LOBBY: 'lobby',         // { config, roster, started }
     VIEW: 'view',           // { seq, view }                  裁剪后的局面
+    SEAT: 'seat',           // { seat }                       房主重排座位后通知新座位
     EVENT: 'event',         // { kind, ... }                  音效 / 提示（可选）
     PONG: 'pong',
     BYE: 'bye'

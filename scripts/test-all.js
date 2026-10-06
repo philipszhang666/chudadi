@@ -30,7 +30,8 @@ var SYNTAX_FILES = [
   'js/protocol.js', 'js/net.js', 'js/room.js', 'js/ui.js', 'js/ai_v1.js',
   'js/cards.js', 'js/game.js', 'js/ai.js', 'js/sound.js',
   'server.js', 'scripts/test-room.js', 'scripts/check-dom.js',
-  'scripts/check-undeclared.js', 'scripts/test-ui-online.js', 'scripts/dom-shim.js'
+  'scripts/check-undeclared.js', 'scripts/test-ui-online.js', 'scripts/dom-shim.js',
+  'scripts/repro-seat.js'
 ];
 
 SYNTAX_FILES.forEach(function (f) {
@@ -97,6 +98,17 @@ console.log('界面测试：真的点「出牌」按钮（房主 / 客户端两�
 console.log('='.repeat(56));
 
 if (runInProcess('./test-ui-online.js') !== 0) failed++;
+
+/* ---------------- 5. 座位重排回归 ----------------
+   候场里有人离开会留下「座位空洞」，开局时房主把座位补成连续号。
+   这时如果不同步 net 连接和每个客户端的座位号，有的真人会再也收不到
+   任何视图（卡在最后一帧 / 看不到结算），有的会收到「别人座位」的视图
+   （轮次对不上，两个玩家互相干等出牌）。 */
+console.log('\n' + '='.repeat(56));
+console.log('座位重排回归：候场有人离开后开局，座位号必须重新对齐');
+console.log('='.repeat(56));
+
+if (runInProcess('./repro-seat.js') !== 0) failed++;
 
 console.log('\n' + '='.repeat(56));
 if (failed) {
