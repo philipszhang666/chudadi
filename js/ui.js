@@ -9,7 +9,7 @@
 
   // 游戏版本号：显示在设置面板底部。每次发版改这里一处；
   // 并把 index.html 里所有 styles.css?v=… / *.js?v=… 的版本号改成同一个值（查找替换，一次性全改）。
-  var APP_VERSION = 'V3.1';
+  var APP_VERSION = 'V3.2';
 
   var state = null;
   var selected = {};        // 选中的牌 id
@@ -39,6 +39,7 @@
   var lastResyncReq = 0;        // 最近一次主动请求同步的时间（限流）
   var netRxSeq = 0;             // 收到的房主消息计数：判断「同步后有没有回音」用，
                                 // 比时间戳稳（同一毫秒内到达不会误判）
+  var waitingForHost = false;   // 联机客户端：已回到开始界面看战绩、等房主开局
 
   /** 记一笔「收到房主消息」：更新存活时间 + 计数 */
   function markAlive() { lastMsgAt = Date.now(); netRxSeq++; }
@@ -495,15 +496,39 @@
 
   var lastSummary = '';     // 上一局的结果，写在开始界面里
 
+  /** 联机客户端：回到「开始界面」看战绩，但自己不能开局（等房主发牌）。
+      这里只是清本机画面以显示开始界面；真正的局面在房主那里，
+      房主一开局就会发来新一帧，syncFromView 收到 playing 帧自动收回界面。 */
+  function showWaitingForHost(summary) {
+    waitingForHost = true;
+    clearTimers();
+    busy = false;
+    botTimerPending = false;
+    selected = {};
+    legalCache = { turn: -1, current: null, moveCount: -1, list: [] };
+    centerVisual = { sig: '' };
+    lastTurnAnnounced = -1;
+    tailIds = [];
+    dragging = false;
+    suppressClick = false;
+    state = null;
+    if (summary !== undefined) lastSummary = summary;
+    var ov = $('overlay');
+    if (ov) ov.hidden = true;
+    renderIdle();
+  }
+
   /** 回到未开局状态。summary 传入上一局结果时会显示出来 */
   function showStartScreen(summary) {
     // 联机时不能自己把牌桌清掉：牌局在房主那里，客户端清空只会
     // 让自己看到一个空桌子、然后被下一帧视图又填回来。
     if (mode === 'online') {
-      if (!netIsHost) { setSelInfo('等房主开局…'); return; }
+      // 客户端：停在「开始界面」看战绩，开局按钮置灰（等房主）。
+      if (!netIsHost) { showWaitingForHost(summary); return; }
       // 房主回到候场界面 = 通知所有人这一局结束、准备下一局
       if (room) { try { room.backToLobby(); } catch (e) {} }
     }
+    waitingForHost = false;
     clearTimers();          // 作废在途定时器，电脑不会自己接着出牌
     busy = false;
     botTimerPending = false;
@@ -565,13 +590,21 @@
       if ($(id)) $(id).disabled = true;
     });
     setTip('');
-    setSelInfo('点「开始游戏」发牌');
+    setSelInfo(waitingForHost ? '等房主点「开始游戏」…' : '点「开始游戏」发牌');
 
-    if ($('startTitle')) $('startTitle').textContent = lastSummary ? '本局结束' : '准备开始';
+    if ($('startTitle')) $('startTitle').textContent = (waitingForHost || lastSummary) ? '本局结束' : '准备开始';
     // 按钮下面一行：我的累计输赢局数
     if ($('startRecord')) $('startRecord').textContent = myRecordText();
     if ($('startHint')) {
-      $('startHint').textContent = lastSummary || '点「开始游戏」发牌，持 ♦4 的人先出';
+      $('startHint').textContent = waitingForHost
+        ? '等房主点「开始游戏」发牌…'
+        : (lastSummary || '点「开始游戏」发牌，持 ♦4 的人先出');
+    }
+    // 联机客户端在开始界面只能等房主：把「开始游戏」置灰并改文案
+    var startBtn = $('btnStart');
+    if (startBtn) {
+      startBtn.disabled = !!waitingForHost;
+      startBtn.textContent = waitingForHost ? '等待房主开始游戏…' : '开始游戏';
     }
     if ($('center')) $('center').classList.add('idle');
     if ($('startScreen')) $('startScreen').hidden = false;
@@ -1237,10 +1270,29 @@
     }
   }
 
+  /** 我的名字（战绩按名字累计）。不管当下有没有 state 都要能取到：
+      单机恒为「你」；联机从名单 / 昵称里找我坐的那一格。
+      以前直接读 state.players[myIdx()].name —— 可回到开始界面时 state 已清空，
+      于是战绩全按「你」这个名字去查，查不到就成了 0 胜 0 平 0 负。 */
+  function myName() {
+    if (state && state.players[myIdx()] && state.players[myIdx()].name) {
+      return state.players[myIdx()].name;
+    }
+    if (mode === 'online') {
+      for (var i = 0; i < netRoster.length; i++) {
+        if (netRoster[i].seat === myIdx() && netRoster[i].name) return netRoster[i].name;
+      }
+      try {
+        var nick = window.localStorage.getItem('chudadi.nick');
+        if (nick) return nick;
+      } catch (e) {}
+    }
+    return '你';
+  }
+
   /** 我的战绩文字：胜 3 局 · 平 2 局 · 负 1 局（共 6 局） */
   function myRecordText() {
-    var name = state ? state.players[myIdx()].name : '你';
-    var t = tallyOf(name);
+    var t = tallyOf(myName());
     var total = t.win + t.draw + t.lose;
     return '你 胜 ' + t.win + ' 局 · 平 ' + t.draw + ' 局 · 负 ' + t.lose + ' 局（共 ' + total + ' 局）';
   }
@@ -1497,6 +1549,10 @@
     if ($('startScreen')) $('startScreen').hidden = true;   // 收起「开始游戏」
     if ($('lobbyOverlay')) $('lobbyOverlay').hidden = true; // 收起候场大厅，别挡住牌桌 / 结算
     if ($('btnGroup')) $('btnGroup').disabled = false;      // 未开局时禁用过，这里放开
+    // 「开始游戏」可能被客户端的「等待房主」态改过（置灰 + 改文案），
+    // 收牌桌时一并复原，免得下次回到开始界面残留旧状态。
+    var sb = $('btnStart');
+    if (sb) { sb.disabled = false; sb.textContent = '开始游戏'; }
     if ($('center')) $('center').classList.remove('idle');  // 恢复中央的轮次/说明
   }
 
@@ -1581,6 +1637,13 @@
     }
     if (e.roster) netRoster = e.roster;
 
+    // 我（客户端）已经点「回到牌桌」停在「等待房主」的开始界面：
+    // 这时再收到上一局的结算帧（自动追同步常会把 over 视图又发回来），
+    // 别再弹结算 —— 保持在开始界面看战绩。
+    if (waitingForHost && incoming.phase === 'over') return;
+    // 新一局来了：退出「等待房主」，正常把牌桌端上来
+    if (incoming.phase === 'playing') waitingForHost = false;
+
     var wasOver = !!(state && state.phase === 'over');
     var haveBoard = !!state;
     var extra = (e && e.extra) || {};
@@ -1647,6 +1710,12 @@
       if (e.config.difficulty) settings.difficulty = e.config.difficulty;
       if (e.config.speed) settings.speed = e.config.speed;
       applySettingsToUI();
+    }
+    // 房主回到候场 = 这一局结束了：客户端若还停在结算画面，自动跟到
+    // 「等待房主」的开始界面，别把客户端干留在结算上、看不到战绩。
+    if (e && e.phase === 'lobby' && mode === 'online' && !netIsHost &&
+        !waitingForHost && state && state.phase === 'over') {
+      showWaitingForHost('');
     }
     renderLobby();
   }
@@ -2255,8 +2324,8 @@
     if ($('btnResync')) $('btnResync').addEventListener('click', function () { resyncMatch(); });
     // 结算浮层的按钮只负责回到牌桌，真正开始要按正中的「开始游戏」
     $('btnAgain').addEventListener('click', function () {
-      // 客户端：收起结算浮层就行（开新局是房主的事），别卡在结算上
-      if (mode === 'online' && !netIsHost) { var ov = $('overlay'); if (ov) ov.hidden = true; return; }
+      // 房主 / 单机 → 正常回开始界面；客户端 → 回「等待房主」的开始界面
+      // （看得到战绩，开始游戏按钮置灰，等房主发牌）。
       showStartScreen();
     });
     // 只有这一个地方会发牌：正中的「开始游戏」

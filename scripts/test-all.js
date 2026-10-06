@@ -31,7 +31,8 @@ var SYNTAX_FILES = [
   'js/cards.js', 'js/game.js', 'js/ai.js', 'js/sound.js',
   'server.js', 'scripts/test-room.js', 'scripts/check-dom.js',
   'scripts/check-undeclared.js', 'scripts/test-ui-online.js', 'scripts/dom-shim.js',
-  'scripts/repro-seat.js', 'scripts/repro-resync.js', 'scripts/repro-botsettle.js'
+  'scripts/repro-seat.js', 'scripts/repro-resync.js', 'scripts/repro-botsettle.js',
+  'scripts/repro-startstats.js'
 ];
 
 SYNTAX_FILES.forEach(function (f) {
@@ -109,6 +110,15 @@ console.log('座位重排回归：候场有人离开后开局，座位号必须�
 console.log('='.repeat(56));
 
 if (runInProcess('./repro-seat.js') !== 0) failed++;
+
+/* ---------------- 6. 开始界面 / 战绩回归 ----------------
+   打完整局回到开始界面：房主 / 客户端的累计战绩都要能正确显示；
+   客户端也能回到开始界面看战绩（只是「开始游戏」置灰、等房主）。 */
+console.log('\n' + '='.repeat(56));
+console.log('开始界面 / 战绩回归：打完一局后回到开始界面');
+console.log('='.repeat(56));
+
+if (runInProcess('./repro-startstats.js') !== 0) failed++;
 
 console.log('\n' + '='.repeat(56));
 if (failed) {
