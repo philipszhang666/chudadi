@@ -5,6 +5,8 @@
  *   点数大小：3 > 2 > A > K > Q > J > 10 > 9 > 8 > 7 > 6 > 5 > 4
  *   花色大小：♠ > ♥ > ♣ > ♦   （因此 ♦4 是全场最小的牌）
  *   牌型：单张 / 对子 / 三条 / 五张（同花顺 > 四条 > 葫芦 > 同花 > 顺子）
+ *   同花比同花：先比花色（♠ > ♥ > ♣ > ♦），花色相同再比点数（3 最大）再逐张
+ *   同花顺比同花顺：先比顺子大小，相同再比花色
  *   张数规则：只能同张数互比，五张牌型只能和五张比，不能拿去压单张/对子/三条
  *   顺子：线性序列 2 3 4 5 6 7 8 9 10 J Q K A，
  *         最大 10-J-Q-K-A，最小 A-2-3-4-5（特例），无绕圈组合
@@ -284,17 +286,19 @@ var CD = (function () {
   }
 
   /**
-   * 同花比较：按「改版点数」从大到小逐张比（3 > 2 > A > K > ... > 4），
-   * 五张点数序列全部相同才比最大牌的花色。必须与 analyze()/界面排序保持同一口径。
+   * 同花比较：先比花色（♠ > ♥ > ♣ > ♦），花色相同再比点数
+   * （3 > 2 > A > K > ... > 4）：先比最大牌，最大牌相同再逐张比下去。
    * >0 表示 a 大
    */
   function compareFlush(a, b) {
-    var as = sortDesc(a), bs = sortDesc(b); // compareCard 即改版点数序（同花内部同花色，等价于只比点数）
-    for (var i = 0; i < 5; i++) {
+    var as = sortDesc(a), bs = sortDesc(b); // 同花内部同花色，sortDesc 即改版点数从大到小
+    var sd = as[0].suitOrder - bs[0].suitOrder;   // 1) 先比花色（♠>♥>♣>♦）
+    if (sd !== 0) return sd;
+    for (var i = 0; i < 5; i++) {                 // 2) 花色相同 → 先比最大牌，再逐张
       var d = as[i].value - bs[i].value;
       if (d !== 0) return d;
     }
-    return as[0].suitOrder - bs[0].suitOrder;
+    return 0;
   }
 
   /**
@@ -328,7 +332,7 @@ var CD = (function () {
   /** 同张数之间比较，>0 表示 b 大 */
   function comparePlay(b, a) {
     // 五张之间：先比牌型级别（同花顺 > 四条 > 葫芦 > 同花 > 顺子），
-    // 级别相同再比牌力，牌力也相同再比最大牌的花色（见 compareFlush / 顺子分支）。
+    // 级别相同再比牌力：同花「先花色、后点数」(见 compareFlush)，顺子/同花顺「先顺子、后花色」。
     if (isFive(b) && isFive(a)) {
       var lv = (CATEGORY_RANK[b.category] || 0) - (CATEGORY_RANK[a.category] || 0);
       if (lv !== 0) return lv;
@@ -699,7 +703,15 @@ var CD = (function () {
 
   /** 出牌「代价」排序：越小越省牌 */
   function playPower(p) {
-    return (CATEGORY_RANK[p.category] || 0) * 100000 + (p.value || 0) * 10 + (p.main ? p.main.suitOrder : 0);
+    var cat = CATEGORY_RANK[p.category] || 0;
+    if (p.category === 'flush') {
+      // 同花：先花色（♠>♥>♣>♦）再点数（3 最大）再逐张，与 compareFlush 同口径
+      var d = sortDesc(p.cards);
+      var seq = 0;
+      for (var i = 0; i < d.length; i++) seq = seq * 14 + d[i].value;
+      return cat * 10000000 + d[0].suitOrder * 1000000 + seq;
+    }
+    return cat * 10000000 + (p.value || 0) * 1000 + (p.main ? p.main.suitOrder : 0);
   }
 
   /** 从 set 中移除 cards，返回新数组 */

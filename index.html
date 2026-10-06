@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>锄大地 · 改版（3 最大）</title>
-<link rel="stylesheet" href="styles.css?v=13">
+<link rel="stylesheet" href="styles.css?v=3.1">
 </head>
 <body>
 
@@ -264,6 +264,7 @@
     </div>
 
     <p class="set-note">改动人数会结束当前局并回到开始界面；其他设置立即生效。</p>
+    <p class="set-version">当前版本 <b id="appVersion">…</b><span class="set-version-hint">　（若与最新版本不符，按 Ctrl + F5 强制刷新）</span></p>
 
     <div class="dialog-actions">
       <button id="btnApplyNew" class="btn ghost">以当前设置重新开局</button>
@@ -292,7 +293,7 @@
       <p class="rank-line">3 &gt; 2 &gt; A &gt; K &gt; Q &gt; J &gt; 10 &gt; 9 &gt; 8 &gt; 7 &gt; 6 &gt; 5 &gt; 4</p>
       <h3>花色大小</h3>
       <p class="rank-line">♠ 黑桃 &gt; ♥ 红桃 &gt; ♣ 梅花 &gt; ♦ 方块</p>
-      <p>点数相同时比花色，所以 <b>♦4 是全场最小的牌</b>。</p>
+      <p><b>单张 / 对子 / 三条</b>：点数相同时比花色，所以 <b>♦4 是全场最小的牌</b>。</p>
       <h3>先出</h3>
       <p>持有 <b>♦4</b> 的人先出，且<b>第一手必须包含 ♦4</b>（单张 / 对子 / 三条 / 五张牌型均可）。</p>
       <h3>牌型</h3>
@@ -301,7 +302,9 @@
         <li><b>五张牌型</b>：同花顺 &gt; 四条 &gt; 葫芦 &gt; 同花 &gt; 顺子</li>
         <li>四条＝四张同点＋任意 1 张，压得过葫芦（三张同点＋一对）；脚牌不影响大小</li>
         <li><b>只能同张数互比</b>：五张只和五张比，单张 / 对子 / 三条各自只和同张数比</li>
-        <li>五张先比级别，再比牌力；都相同（如都是 5-6-7-8-9）时<b>比最大牌的花色</b></li>
+        <li>五张先比级别（同花顺 &gt; 四条 &gt; 葫芦 &gt; 同花 &gt; 顺子）</li>
+        <li><b>同花比同花</b>：先比<b>花色</b>（♠&gt;♥&gt;♣&gt;♦）；花色相同再比<b>最大牌的点数</b>（3 最大），最大牌相同再逐张比下去</li>
+        <li><b>顺子 / 同花顺比大小</b>：先比<b>顺子大小</b>，顺子相同再比<b>花色</b>（如 ♦9-10-J-Q-K 压得过 ♠3-4-5-6-7）</li>
       </ul>
       <h3>顺子</h3>
       <p>按线性序列 <b>2 3 4 5 6 7 8 9 10 J Q K A</b> 取连续五张：</p>
@@ -356,20 +359,20 @@
 </div>
 
 <!-- 联机依赖：PeerJS（已 vendor 到本地，不依赖 CDN） -->
-<script src="vendor/peerjs.min.js?v=13"></script>
+<script src="vendor/peerjs.min.js?v=3.1"></script>
 
-<script src="js/cards.js?v=13"></script>
-<script src="js/game.js?v=13"></script>
-<script src="js/determinize.js?v=13"></script>
-<script src="js/endgame.js?v=13"></script>
-<script src="js/mcts.js?v=13"></script>
-<script src="js/ai.js?v=13"></script>
-<script src="js/sound.js?v=13"></script>
+<script src="js/cards.js?v=3.1"></script>
+<script src="js/game.js?v=3.1"></script>
+<script src="js/determinize.js?v=3.1"></script>
+<script src="js/endgame.js?v=3.1"></script>
+<script src="js/mcts.js?v=3.1"></script>
+<script src="js/ai.js?v=3.1"></script>
+<script src="js/sound.js?v=3.1"></script>
 <!-- 联机三层：裁剪视图 → 传输 → 权威房间。必须在 ui.js 之前加载 -->
-<script src="js/protocol.js?v=13"></script>
-<script src="js/net.js?v=13"></script>
-<script src="js/room.js?v=13"></script>
-<script src="js/ui.js?v=13"></script>
-<script src="js/orientation.js?v=13"></script>
+<script src="js/protocol.js?v=3.1"></script>
+<script src="js/net.js?v=3.1"></script>
+<script src="js/room.js?v=3.1"></script>
+<script src="js/ui.js?v=3.1"></script>
+<script src="js/orientation.js?v=3.1"></script>
 </body>
 </html>

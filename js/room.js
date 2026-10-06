@@ -250,11 +250,18 @@ var Room = (function () {
 
     function handleHello(msg, conn) {
       var seat = null;
+      var name = msg.name || '';
 
-      // 重连：原来坐哪就尽量还给哪
+      // 重连：原来坐哪就尽量还给哪。
+      // 判据从「那个座位必须已标记掉线」放宽成「掉线、或名字对得上」——
+      // 因为网络抖动时房主【不一定】收到掉线通知（DataConnection 的 close
+      // 在手机上经常不触发），座位还挂着 online=true。这时若只认「已掉线的
+      // 座位」，重连的客户端会被当成新人：局中 firstFreeSeat() 又返回 -1，
+      // 于是老玩家重连反被「房间满了」挡在门外，怎么都回不来。
+      // （重连的客户端会带上自己原来的座位号；名字再做一道确认，避免误占。）
       if (msg.seat !== null && msg.seat !== undefined) {
         var same = roster.filter(function (r) { return r.seat === msg.seat; })[0];
-        if (same && !same.online) seat = same.seat;
+        if (same && (!same.online || same.name === name)) seat = same.seat;
       }
       if (seat === null) seat = firstFreeSeat();
 

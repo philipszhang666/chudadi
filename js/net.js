@@ -92,6 +92,9 @@ var Net = (function () {
 
   function sendTo(conn, msg) {
     if (!conn) return false;
+    // 通道已经关了就别假装发成功 —— 上层（比如「同步对局」）要靠这个返回值
+    // 判断「根本发不出去」，才好立刻改成重连，而不是干等一条不会到的回包。
+    if (conn.open === false) return false;
     try {
       conn.send(msg);
       return true;
@@ -284,6 +287,25 @@ var Net = (function () {
     join(code, lastJoinName);
   }
 
+  /**
+   * 强制重连：不管当前这条连接看起来是死是活，直接拆了重来。
+   * poke() 只在 conn.open 已是 false 时才重连；而 WebRTC 有一种「半死」——
+   * open 还是 true，消息却石沉大海，poke 发的 PING 也跟着没了。
+   * 所以「同步对局」一旦发出却等不到回音，就得靠这个拆掉重建：
+   * 重连后房主会在 WELCOME 之后补发当前局面。
+   */
+  function rejoin() {
+    if (role !== 'client' || closedByUs || !code) return;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    // 抛弃旧连接前先摘掉它的 close 监听：否则它随后触发 scheduleReconnect，
+    // 会和这里的「立即重连」撞车，变成两条重连同时进行。
+    try { if (hostConn && hostConn.removeAllListeners) hostConn.removeAllListeners('close'); } catch (e) {}
+    try { if (peer) peer.destroy(); } catch (e) {}
+    retry = 0;
+    emit('reconnecting', { attempt: 1, delay: 0 });
+    join(code, lastJoinName);
+  }
+
   function send(msg) {
     if (role === 'host') return false;       // 房主自己要发得指名道姓
     retry = 0;
@@ -299,7 +321,7 @@ var Net = (function () {
 
   var api = {
     on: on,
-    host: host, join: join, close: close, poke: poke,
+    host: host, join: join, close: close, poke: poke, rejoin: rejoin,
     attach: attach, detachSeat: detachSeat,
     broadcast: broadcast, sendToSeat: sendToSeat, send: send,
     iceServers: iceServers,

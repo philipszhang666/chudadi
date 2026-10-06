@@ -7,6 +7,10 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
+  // 游戏版本号：显示在设置面板底部。每次发版改这里一处；
+  // 并把 index.html 里所有 styles.css?v=… / *.js?v=… 的版本号改成同一个值（查找替换，一次性全改）。
+  var APP_VERSION = 'V3.1';
+
   var state = null;
   var selected = {};        // 选中的牌 id
   var legalCache = { turn: -1, current: null, list: [] };
@@ -33,6 +37,11 @@
   var netStatus = '';           // 顶栏/底部显示的网络状态文字
   var lastMsgAt = 0;            // 最近一次收到房主消息的时间（自动追同步用）
   var lastResyncReq = 0;        // 最近一次主动请求同步的时间（限流）
+  var netRxSeq = 0;             // 收到的房主消息计数：判断「同步后有没有回音」用，
+                                // 比时间戳稳（同一毫秒内到达不会误判）
+
+  /** 记一笔「收到房主消息」：更新存活时间 + 计数 */
+  function markAlive() { lastMsgAt = Date.now(); netRxSeq++; }
 
   /** 我的座位号。单机时人类恒为 0，联机时是房主分配的座位 */
   function myIdx() { return mode === 'online' ? netSeat : 0; }
@@ -1559,7 +1568,7 @@
   function syncFromView(e, force) {
     var incoming = e && e.view;
     if (!incoming) return;
-    lastMsgAt = Date.now();    // 收到一帧 = 连接还活着（自动追同步用）
+    markAlive();    // 收到一帧 = 连接还活着（自动追同步用）
     if (!force && e.seq !== undefined) {
       // 序号倒退 = 房主重开了一局（房间把 seq 归零）却没走候场大厅。
       // 以前这里一律当成「旧消息」丢掉，于是客户端会一直卡在上一局的
@@ -1626,7 +1635,7 @@
   /** 联机：房间名单 / 配置变了 */
   function syncLobby(e) {
     if (e && e.roster) netRoster = e.roster;
-    lastMsgAt = Date.now();    // 收到房主消息 = 连接还活着
+    markAlive();    // 收到房主消息 = 连接还活着
     // 回到候场：下一局的视图序号会从 0 重新开始，去重基准也要跟着归零，
     // 否则新一局的视图会被当成旧消息全部丢掉
     if (e && e.phase === 'lobby') lastViewSeq = -1;
@@ -1821,7 +1830,10 @@
       }
     });
 
-    Net.on('data', function (msg, conn) { if (room) room.onData(msg, conn); });
+    Net.on('data', function (msg, conn) {
+      markAlive();              // 收到房主任何消息 = 连接还活着（追同步/重连判定用）
+      if (room) room.onData(msg, conn);
+    });
     Net.on('disconn', function () {
       trace('和房主的连接断了');
       setNetStatus('和房主的连接断了，正在重连…');
@@ -1952,10 +1964,41 @@
       return;
     }
     lastResyncReq = Date.now();
-    lastMsgAt = Date.now();
     trace('请求房主重新同步对局');
-    Net.send({ type: ProtocolNS.C2H.RESYNC });
+    var sent = Net.send({ type: ProtocolNS.C2H.RESYNC });
+    if (!sent) {
+      // 通道已经断了：这条 RESYNC 根本发不出去，别再干等，直接重连。
+      trace('同步请求发不出去（通道已断），改为重连房主');
+      setTip('连接已断，正在重新连接房主…');
+      forceReconnect();
+      return;
+    }
     setTip('已请房主重新同步…');
+    armResyncFallback();
+  }
+
+  var resyncFallbackTimer = null;
+  /** 发出同步请求后，若迟迟收不到房主任何消息，判定「通道半死」→ 强制重连。
+      正常的 RESYNC 房主会立刻回一帧，所以这个兜底只在真丢包时才会触发。 */
+  function armResyncFallback() {
+    if (resyncFallbackTimer) clearTimeout(resyncFallbackTimer);
+    var before = netRxSeq;
+    var ms = (window.__game && window.__game.resyncFallbackMs) || 3500;
+    resyncFallbackTimer = setTimeout(function () {
+      resyncFallbackTimer = null;
+      if (mode !== 'online' || netIsHost || !room) return;
+      if (netRxSeq !== before) return;           // 期间收到房主消息 → 已恢复
+      trace('请求同步后仍无房主回应，判定连接半死，强制重连');
+      forceReconnect();
+    }, ms);
+  }
+
+  /** 把到房主的连接拆了重建（重连后房主会补发当前权威局面） */
+  function forceReconnect() {
+    if (mode !== 'online' || netIsHost || !room) return;
+    lastResyncReq = Date.now();        // 顺手限流，别和自动追同步撞在一起
+    if (Net.rejoin) Net.rejoin();
+    else if (Net.poke) Net.poke();
   }
 
   /* ---------------- 设置局域网/联机相关的界面 ---------------- */
@@ -2327,6 +2370,9 @@
   applySound();
   bind();
   bindNetUI();
+  // 版本号写进设置面板：显示的正是「实际加载到的 JS 版本」。
+  // 若你看到的还是旧号（或占位符 …），说明命中了浏览器缓存，Ctrl+F5 强刷即可。
+  if ($('appVersion')) $('appVersion').textContent = APP_VERSION;
   // 刚进页面不自动发牌：停在「未开局」，等玩家点正中的「开始游戏」
   showStartScreen('');
 
@@ -2334,6 +2380,9 @@
   window.__game = {
     get state() { return state; },
     newGame: newGame,
+    // 「同步」发出后等房主回包的上限（毫秒）；超时仍无回音就强制重连。
+    // 测试里可调小，免得干等。
+    resyncFallbackMs: 3500,
     legal: function () { return currentLegal(); },
     render: renderAll,
     // 联机调试用
