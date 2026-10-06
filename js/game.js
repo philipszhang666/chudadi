@@ -347,14 +347,27 @@ var Game = (function () {
   /**
    * 出完一家后，本局是否该结束（用于「打完排名次」的两类模式）。
    *   · A3 地主 → 交给 landlordDecided；
-   *   · 非 A3「打到末游」→ 玩家名次已定就结束：
-   *       玩家自己出完 → 名次既定（第 1 名＝胜 / 第 2 名＝平 / 第 3、4 名＝负）；
-   *       已有两名玩家出完而玩家还没出完 → 玩家最好只能第 3 名 → 判负。
+   *   · 非 A3「打到末游」→ 按「真人」判，而不是只盯着某一个座位：
+   *       联机有多个真人时，要等【所有真人都出完】才提前收场
+   *       （例如两个好友组队，得等两人都出完；剩下的电脑位按剩余张数补名次）；
+   *       只有 1 个真人（单机）时保持老口径：自己出完，或已注定第 3 名开外就收场；
+   *       兜底：只剩最后一名有牌（末游）一定收场。
    */
   function finishedDecided(state) {
     if (state.landlord) return landlordDecided(state);
-    if (state.players[state.humanIndex].finished) return true;
-    return state.finishCount >= 2;
+
+    // 只剩最后一名有牌（末游）—— 兜底收场
+    var remaining = state.players.filter(function (q) { return q.hand.length > 0; }).length;
+    if (remaining <= 1) return true;
+
+    // 数「真人」：联机多个真人时等所有人都出完；只有一个真人时按老口径。
+    var humanCount = 0, anyHumanPlaying = false;
+    for (var i = 0; i < state.players.length; i++) {
+      var p = state.players[i];
+      if (p.isHuman) { humanCount++; if (!p.finished) anyHumanPlaying = true; }
+    }
+    if (humanCount > 1) return !anyHumanPlaying;
+    return !anyHumanPlaying || state.finishCount >= 2;
   }
 
   /**

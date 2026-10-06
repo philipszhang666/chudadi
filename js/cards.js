@@ -224,12 +224,15 @@ var CD = (function () {
     var st = straightInfo(cards);
     var desc = sortDesc(cards);
 
+    // 顺子/同花顺「比花色」用顺子顶端牌（34567 取 7，A2345 取 5），
+    // 不能用改版点数最大的那张（3 > 2 > ... 会取到 3，导致同段顺子比花色结论相反）。
+    var straightTop = st.ok ? (cards.filter(function (c) { return c.rank === st.topRank; })[0] || desc[0]) : null;
+
     if (flush && st.ok) {
-      var sfd = sortDesc(cards);
       return {
         ok: true, category: 'straightflush', name: '同花顺', size: 5, cards: cards,
         value: st.topValue,
-        topRank: st.topRank, special: st.special, main: sfd[0], flushSuit: sfd[0].suit
+        topRank: st.topRank, special: st.special, main: straightTop, flushSuit: straightTop.suit
       };
     }
 
@@ -262,7 +265,7 @@ var CD = (function () {
     if (st.ok) {
       return {
         ok: true, category: 'straight', name: '顺子', size: 5, cards: cards,
-        value: st.topValue, topRank: st.topRank, special: st.special, main: desc[0]
+        value: st.topValue, topRank: st.topRank, special: st.special, main: straightTop
       };
     }
 
@@ -273,7 +276,7 @@ var CD = (function () {
 
   function isFive(play) { return play && play.size === 5; }
 
-  /** 同花专用排序：按改版点数（同点再比花色）从大到小 */
+  /** 顺子自然顺序排序：A 最大、3/2 最小。仅供顺子相关场景使用，不用于同花比较 */
   function sortByStraightOrderDesc(cards) {
     return cards.slice().sort(function (a, b) {
       return STRAIGHT_ORDER[b.rank] - STRAIGHT_ORDER[a.rank] || b.suitOrder - a.suitOrder;
@@ -281,13 +284,14 @@ var CD = (function () {
   }
 
   /**
-   * 同花比较：逐张比排名序列（从大到小），全部相同才比最大牌的花色。
+   * 同花比较：按「改版点数」从大到小逐张比（3 > 2 > A > K > ... > 4），
+   * 五张点数序列全部相同才比最大牌的花色。必须与 analyze()/界面排序保持同一口径。
    * >0 表示 a 大
    */
   function compareFlush(a, b) {
-    var as = sortByStraightOrderDesc(a), bs = sortByStraightOrderDesc(b);
+    var as = sortDesc(a), bs = sortDesc(b); // compareCard 即改版点数序（同花内部同花色，等价于只比点数）
     for (var i = 0; i < 5; i++) {
-      var d = STRAIGHT_ORDER[as[i].rank] - STRAIGHT_ORDER[bs[i].rank];
+      var d = as[i].value - bs[i].value;
       if (d !== 0) return d;
     }
     return as[0].suitOrder - bs[0].suitOrder;

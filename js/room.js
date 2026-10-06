@@ -146,7 +146,22 @@ var Room = (function () {
     }
 
     function aiAlgo() {
-      return ai.algo ? ai.algo(config.difficulty) : { diff: 'hardv2' };
+      var algo = ai.algo ? ai.algo(config.difficulty) : { diff: 'hardv2' };
+      // A3 地主模式：换成地主版算法，和单机 botPlay() 完全对齐：
+      //   普通档 hardv2 → hardA3v2
+      //   困难档 search(rollout:hardv2@8) → search(rollout:hardv1)
+      //   （rollout 换成便宜的 hardv1；搜索终局收益仍由 mcts.js 按「地主队名次」结算）
+      if (config.landlord) {
+        if (algo.diff === 'hardv2') {
+          algo = { diff: 'hardA3v2' };
+        } else if (algo.diff === 'search' && algo.opts && algo.opts.search) {
+          var so = {}, s0 = algo.opts.search;
+          for (var k in s0) if (s0.hasOwnProperty(k)) so[k] = s0[k];
+          so.rollout = 'hardv1';
+          algo = { diff: 'search', opts: { search: so } };
+        }
+      }
+      return algo;
     }
 
     function aiSpeed() {

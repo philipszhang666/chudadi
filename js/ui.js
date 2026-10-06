@@ -120,6 +120,7 @@
   function applySettingsToUI() {
     var map = {
       segPlayers: settings.landlord ? 'a3' : String(settings.playerCount),
+      segMode: settings.landlord ? '' : String(settings.playerCount),
       segDifficulty: settings.difficulty,
       segSpeed: settings.speed,
       segDimUnplayable: settings.dimUnplayable ? 'on' : 'off',
@@ -139,6 +140,7 @@
     var sum = $('setupSummary');
     if (sum) sum.textContent = modeLabel + ' · ' + labels[settings.difficulty];
     applyRoleVisibility();   // 谁能改哪些开关，跟着角色走
+    refreshModeAvailability(); // 联机时把「人数不够坐」的选项灰掉
   }
 
   /** 高精度计时（拿不到 performance 时退化成 Date.now） */
@@ -508,6 +510,14 @@
     renderIdle();
   }
 
+  /** 未开局时隐藏「你的手牌」标题行与座位上的「你 N 张」 */
+  function setIdleChrome(idle) {
+    var head = $('meHead');
+    if (head) head.hidden = !!idle;
+    var seatName = $('mySeatName');
+    if (seatName) seatName.hidden = !!idle;
+  }
+
   /** 未开局的画面：牌桌清空，只留正中的「开始游戏」按钮 */
   function renderIdle() {
     // 座位清空（座位框保留，开局时布局不跳动）
@@ -525,6 +535,7 @@
     if ($('myCountInline')) $('myCountInline').textContent = '0 张';
     if ($('myCount')) $('myCount').textContent = '0 张';
     if ($('myBadge')) $('myBadge').hidden = true;
+    setIdleChrome(true);
 
     if ($('turnTag')) $('turnTag').textContent = '等待开始';
     if ($('roundTag')) $('roundTag').textContent = '—';
@@ -1399,6 +1410,7 @@
 
   function renderAll() {
     if (!state) return;
+    setIdleChrome(false);
     applyLayout();   // 内部会调用 renderMySeat
     // 所有「不是我」的座位都画到旋转后的槽位上（槽位号由 slotOfSeat 算）
     state.players.forEach(function (p) {
@@ -1669,6 +1681,7 @@
     }
 
     applyRoleVisibility();   // 客户端不该看到房主的开关
+    refreshModeAvailability(); // 人数选项：坐不下的灰掉
   }
 
   function showLobbyOverlay() {
@@ -1880,6 +1893,7 @@
     lastViewSeq = -1;
     var ov = $('lobbyOverlay'); if (ov) ov.hidden = true;
     setNetStatus('');
+    refreshModeAvailability();   // 回到单机：清掉灰显
     setTip('✗ ' + (reason || '已离开房间'), 'err');
     showStartScreen('');
   }
@@ -1905,6 +1919,7 @@
         btn.addEventListener('click', function () {
           var v = btn.dataset && btn.dataset.value;
           if (!v) return;
+          if (btn.disabled) return;
           if (!canEditGameSetup()) { refuseSetupEdit(); return; }
           settings.playerCount = Number(v);
           settings.landlord = false;      // A3 地主固定 4 人，这边只能选人数
@@ -2072,24 +2087,59 @@
     if (startBtn && mode === 'online') startBtn.hidden = isClient;
   }
 
+  /** 联机时占用座位的真人数（含掉线但座位还留着的） */
+  function humanSeatCount() {
+    if (mode !== 'online') return 0;
+    return (room && room.roster) ? room.roster.length : netRoster.length;
+  }
+
+  /**
+   * 刷新「游戏人数」选项的可选性：联机候场时，人数不能少于已在座的真人数。
+   *   4 人在线 → 「3 人」灰掉，只能 4 人 / A3；
+   *   3 人在线（或房间只设 3 人）→ 3 / 4 / A3 都能选，选 4 或 A3 由电脑补空位。
+   *   单机时一律可选。
+   */
+  function refreshModeAvailability() {
+    var humans = humanSeatCount();
+    [$('segPlayers'), $('segMode')].forEach(function (box) {
+      if (!box) return;
+      Array.prototype.forEach.call(box.children, function (btn) {
+        var v = btn.dataset && btn.dataset.value;
+        if (!v) return;
+        var count = (v === 'a3') ? 4 : Number(v);
+        var dis = (mode === 'online') && (count < humans);
+        btn.disabled = dis;
+        btn.classList.toggle('is-disabled', dis);
+      });
+    });
+  }
+
   /** 「游戏人数」三选一：A3 地主 = 4 人局 + ♠A/♠3 暗队 */
   function bindPlayerMode() {
     var box = $('segPlayers');
     if (!box) return;
     Array.prototype.forEach.call(box.children, function (btn) {
       btn.addEventListener('click', function () {
+        if (btn.disabled) return;
         if (!canEditGameSetup()) { refuseSetupEdit(); return; }
         var v = btn.dataset && btn.dataset.value;
-        if (v === 'a3') { settings.landlord = true; settings.playerCount = 4; }
-        else { settings.landlord = false; settings.playerCount = Number(v); }
+        var count = (v === 'a3') ? 4 : Number(v);
+        var landlord = (v === 'a3');
+        // 没变化就不折腾（免得点一下就把当前牌局收掉）
+        if (settings.playerCount === count && !!settings.landlord === landlord) return;
+        settings.landlord = landlord;
+        settings.playerCount = count;
         saveSettings();
+        // 联机：先写进房间配置（会广播给所有人），本机设置再随 syncLobby 对齐；
+        // 这样人数 / 玩法才真正生效，而不是被房间旧配置覆盖回去。
+        if (mode === 'online' && netIsHost) lobbySetConfig({ playerCount: count, landlord: landlord });
         applySettingsToUI();
         // 玩法 / 人数变了，当前这局的牌数 / 座位就对不上了：
-        // 回到开始界面等玩家自己开局（不自动发牌）
+        // 回到候场 / 开始界面等玩家自己开局（不自动发牌）
         showStartScreen();
-        setTip(settings.landlord
+        setTip(landlord
           ? '已切换为 A3 地主（4 人暗队：♠A 与 ♠3 一队），点「开始游戏」发牌'
-          : '已切换为 ' + settings.playerCount + ' 人局，点「开始游戏」发牌');
+          : '已切换为 ' + count + ' 人局，点「开始游戏」发牌');
       });
     });
   }
@@ -2118,6 +2168,7 @@
     // 设置
     $('btnSettings').addEventListener('click', function () {
       $('settingsOverlay').hidden = false;
+      refreshModeAvailability();   // 按当前在线人数刷新可选性
     });
     $('btnCloseSettings').addEventListener('click', function () {
       $('settingsOverlay').hidden = true;

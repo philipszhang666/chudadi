@@ -55,7 +55,7 @@
 
     <!-- 你的座位：下方正中 -->
     <section class="seat seat-me" id="seat-me">
-      <div class="pname">
+      <div class="pname" id="mySeatName">
         <span class="dot"></span>
         <span>你</span>
         <span class="pc" id="myCountInline">13 张</span>
@@ -67,7 +67,7 @@
 
   <!-- 我的区域 -->
   <footer class="me">
-    <div class="me-head">
+    <div class="me-head" id="meHead">
       <span class="me-name">你的手牌</span>
       <span class="me-count" id="myCount">13 张</span>
       <span class="badge" id="myBadge" hidden>报牌！</span>
@@ -96,7 +96,7 @@
       <button id="btnStart" class="btn primary start-btn">开始游戏</button>
       <p class="start-record" id="startRecord">你 赢 0 局 · 输 0 局（共 0 局）</p>
       <p class="start-hint" id="startHint">点「开始游戏」发牌，持 ♦4 的人先出</p>
-      <button id="btnNetEntry" class="btn ghost net-entry">🌐 和朋友联机（异地也能玩）</button>
+      <button id="btnNetEntry" class="btn ghost net-entry">🌐 和朋友联机</button>
     </div>
   </div>
 
@@ -106,11 +106,7 @@
 <div class="overlay" id="lobbyOverlay" hidden>
   <div class="dialog">
     <h2>和朋友联机</h2>
-    <p class="lobby-lead">
-      不需要服务器：开房的那台设备就是「房主」，其他人通过 WebRTC 直连它。<br>
-      <b>不在同一个网络也能玩</b>——各自的手机连一下公共信令服务器完成牵线，
-      之后牌局数据就在两台手机之间直接传。同一个 Wi-Fi 下只是更快一点。
-    </p>
+    <p class="lobby-lead">开房的那台设备就是「房主」，其他人直连它，<b>异地也能玩</b>。</p>
 
     <div class="lobby-name-row">
       <span class="lobby-label">你的昵称</span>
@@ -121,7 +117,7 @@
     <div class="lobby-cols">
       <div class="lobby-col">
         <h3>开一个房</h3>
-        <p class="lobby-note">你来当房主。房主也是玩家，不用额外挂一台设备。</p>
+        <p class="lobby-note">你来当房主，同时也是玩家。</p>
         <button id="btnHost" class="btn primary">开房</button>
       </div>
       <div class="lobby-col">
@@ -154,16 +150,10 @@
       <details class="lobby-diag">
         <summary>连不上？看这里</summary>
         <p class="lobby-note">
-          如果点了「加入」一直没反应，先看下面这段轨迹最后一行停在哪。
-          另外可以打开 <a id="diagLink" href="diag.html" target="_blank">联机自检</a>
-          跑一遍，它会检查信令、STUN、TURN 和局域网候选是否正常。
+          点了「加入」没反应：看下面轨迹最后一行停在哪，或跑一遍 <a id="diagLink" href="diag.html" target="_blank">联机自检</a>。
         </p>
         <p class="lobby-note">
-          最常见的两种连不上：<br>
-          ① <b>路由器开了 AP 隔离</b>（公共 Wi-Fi、酒店、部分 mesh 路由常见）——
-             同一个 Wi-Fi 下设备之间也被禁止互通。换个热点或换网络。<br>
-          ② <b>网络封了 UDP</b>（校园网 / 公司网）—— 已配 443/TCP 的 TURN 中继兜底，
-             但若仍失败，换成手机流量试。
+          常见原因：① <b>路由器开了 AP 隔离</b>——换个热点；② <b>网络封了 UDP</b>——换成手机流量。
         </p>
         <div class="dialog-actions">
           <button id="btnCopyDiag" class="btn ghost small">复制诊断文本</button>
@@ -176,8 +166,7 @@
       <div class="set-row host-only">
         <div class="set-label">
           <b>游戏人数</b>
-          <small>座位数由房主决定。人没坐满时空位交给电脑；
-                 3 人局 52 张按 17 张发、余下 1 张随机补给其中一人</small>
+          <small>房主决定；空位由电脑补上，人数不能少于已在座的人</small>
         </div>
         <div class="segmented" id="segMode">
           <button class="seg" data-value="3">3 人</button>
@@ -195,16 +184,14 @@
   <div class="dialog">
     <h2>设置</h2>
     <p class="set-note host-only-note" id="settingsHostNote" hidden>
-      联机时<b>人数 / 玩法 / 电脑难度 / 思考速度</b>由房主决定，你这边看不到这些开关。
-      <b>音效</b>和<b>灰显提示</b>是你自己设备上的偏好，随时可改。
+      联机时，人数 / 玩法 / 难度 / 速度由房主决定；音效和灰显是你自己的偏好。
     </p>
     <div class="set-list">
 
       <div class="set-row host-only">
         <div class="set-label">
           <b>游戏人数</b>
-          <small>3 人局：52 张按 17 张发，余下 1 张随机补给其中一人（18/17/17）；<br>
-                 A3 地主：4 人局，持 ♠A 与 ♠3 者暗中一队（找朋友）</small>
+          <small>3 人局 18/17/17；A3 地主：持 ♠A 与 ♠3 的人暗中一队（仅 4 人局）</small>
         </div>
         <div class="segmented" id="segPlayers">
           <button class="seg" data-value="3">3 人</button>
@@ -216,8 +203,7 @@
       <div class="set-row host-only">
         <div class="set-label">
           <b>非 A3 打到末游</b>
-          <small>仅对 3 人 / 4 人局生效（A3 地主不受影响）。打开后不再「头游即结束」，而是打到你的名次定下来：
-                你<b>头游</b>＝胜；你<b>第 2 名</b>＝平局；有<b>两名其他人先出完</b>（你最好只能第 3 名）＝负</small>
+          <small>头游＝胜、第 2 名平、其余负；联机多个真人时，等所有人都打完才收场</small>
         </div>
         <div class="segmented" id="segNonA3ToLast">
           <button class="seg" data-value="off">关</button>
@@ -228,7 +214,7 @@
       <div class="set-row host-only">
         <div class="set-label">
           <b>电脑难度</b>
-          <small>简单=贪心；普通=记牌+手牌结构+该不该压；困难=ISMCTS 搜索（更强但更慢）</small>
+          <small>简单＝贪心；普通＝记牌＋判断；困难＝搜索（更强更慢）</small>
         </div>
         <div class="segmented" id="segDifficulty">
           <button class="seg" data-value="easy">简单</button>
@@ -240,7 +226,7 @@
       <div class="set-row host-only">
         <div class="set-label">
           <b>电脑思考速度</b>
-          <small>每步目标时长：慢 1200 / 普通 800 / 快 400 ms。先算再补时，算得慢就不再等</small>
+          <small>每步思考时长：慢 / 普通 / 快</small>
         </div>
         <div class="segmented" id="segSpeed">
           <button class="seg" data-value="slow">慢</button>
@@ -252,10 +238,7 @@
       <div class="set-row">
         <div class="set-label">
           <b>标注不能出的牌</b>
-          <small>默认关闭：手牌不做任何提示。<b>选牌不设限</b>——想出哪几张就选哪几张，
-                点「出牌」时才判断合法性，不合法会在底部弹红色警告说明原因。<br>
-                打开后，当前不参与任何可出牌型的牌会被灰色蒙层压暗。这只是视觉提示，
-                压暗的牌照样能选、能出（牌面本身始终不透明）</small>
+          <small>打开后，当前出不掉的牌会灰色压暗（只是视觉提示，照样能选能出）</small>
         </div>
         <div class="segmented" id="segDimUnplayable">
           <button class="seg" data-value="off">不提示</button>
@@ -266,8 +249,7 @@
       <div class="set-row">
         <div class="set-label">
           <b>音效</b>
-          <small>选牌、出牌、轮到你了、报牌、胜负都有提示音。<br>
-                音效用 Web Audio 实时合成，不加载任何音频文件</small>
+          <small>选牌、出牌、轮到你、报牌、胜负的提示音</small>
         </div>
         <div class="segmented" id="segSound">
           <button class="seg" data-value="off">关</button>
@@ -279,8 +261,7 @@
 
     </div>
 
-    <p class="set-note">改动「游戏人数」会结束当前这局并回到开始界面（不自动发牌，要自己点正中的「开始游戏」）；
-      「以当前设置重新开局」同理，也是回到开始界面而不是直接开牌。其他设置立即生效，不会中断当前牌局。</p>
+    <p class="set-note">改动人数会结束当前局并回到开始界面；其他设置立即生效。</p>
 
     <div class="dialog-actions">
       <button id="btnApplyNew" class="btn ghost">以当前设置重新开局</button>
@@ -311,39 +292,32 @@
       <p class="rank-line">♠ 黑桃 &gt; ♥ 红桃 &gt; ♣ 梅花 &gt; ♦ 方块</p>
       <p>点数相同时比花色，所以 <b>♦4 是全场最小的牌</b>。</p>
       <h3>先出</h3>
-      <p>持有 <b>♦4</b> 的人先出牌，且<b>本局第一手必须包含 ♦4</b>（可以是单张、对子、三条或五张牌型里带它）。</p>
+      <p>持有 <b>♦4</b> 的人先出，且<b>第一手必须包含 ♦4</b>（单张 / 对子 / 三条 / 五张牌型均可）。</p>
       <h3>牌型</h3>
       <ul>
         <li><b>单张</b>、<b>对子</b>、<b>三条</b></li>
         <li><b>五张牌型</b>：同花顺 &gt; 四条 &gt; 葫芦 &gt; 同花 &gt; 顺子</li>
-        <li>四条指「四张同点 + 任意 1 张」（<b>四带一</b>），共五张；它<b>压得过葫芦</b>（三张同点 + 一对，即<b>三带二</b>），
-            四条带哪张脚牌都一样大</li>
-        <li><b>只能同张数互比</b>：五张牌型只能和五张比较。<br>
-            别人打三张，你不能用「三带二」之类的五张去压；单张、对子、三条也各自只和同张数比。</li>
-        <li>五张之中先比牌型级别，级别相同再比牌力；牌力也相同（比如双方都是 5-6-7-8-9）时，<b>比最大牌的花色</b>。</li>
+        <li>四条＝四张同点＋任意 1 张，压得过葫芦（三张同点＋一对）；脚牌不影响大小</li>
+        <li><b>只能同张数互比</b>：五张只和五张比，单张 / 对子 / 三条各自只和同张数比</li>
+        <li>五张先比级别，再比牌力；都相同（如都是 5-6-7-8-9）时<b>比最大牌的花色</b></li>
       </ul>
       <h3>顺子</h3>
       <p>按线性序列 <b>2 3 4 5 6 7 8 9 10 J Q K A</b> 取连续五张：</p>
       <ul>
         <li><b>最大顺子：10-J-Q-K-A</b></li>
         <li><b>最小顺子：A-2-3-4-5</b>（特例）</li>
-        <li>没有绕圈组合，所以 <code>J-Q-K-A-2</code>、<code>Q-K-A-2-3</code> 都不算顺子</li>
+        <li>无绕圈组合（<code>J-Q-K-A-2</code>、<code>Q-K-A-2-3</code> 不算顺子）</li>
         <li>同花顺同理。</li>
       </ul>
       <h3>出牌流程</h3>
-      <p>轮流出牌，压不过或不想出可以过牌。其余三家都过牌后，最后出牌的人重新领出任意牌型。先出完手牌者获胜。</p>
-      <p><b>选牌不设限</b>：手牌想出哪几张就选哪几张（暂时出不掉的也能选），
-        点 <b>出牌</b> 时才判断合不合法，不合法会在底部弹红色警告说明原因。</p>
-      <p>选牌可以<b>单击</b>，也可以<b>按住鼠标左键在牌上划过去</b>一次选一串：
-        从没选中的牌开始划 = 划过的全选中；从已选中的牌开始划 = 划过的全取消。</p>
+      <p>轮流出牌，压不过或不想出可过牌；其余三家都过牌后，最后出牌者重新领出。先出完手牌者获胜。</p>
+      <p>选牌不设限，点 <b>出牌</b> 时才判合法性（不合法会在底部弹红色提示）。可<b>单击</b>选单张，
+        也可<b>按住左键划过一串</b>牌批量选 / 取消。</p>
       <h3>捡牌（组合）</h3>
-      <p>选中几张牌后点 <b>组合</b>，这几张牌会一起挪到<b>手牌最右边</b>，其余牌保持原来的大小顺序，
-        同时<b>自动取消选中</b>（捡过去的牌会自己降下去），方便把打算留着的牌拎出来看。</p>
-      <p><b>别人出牌的时候也能选牌、用 组合</b>，只是这期间 出牌 / 过牌 / 提示 是禁用的。</p>
-      <p><b>没选牌时点 组合 = 恢复默认排序</b>；开新一局会自动恢复默认排序。</p>
+      <p>选中几张后点 <b>组合</b>，这些牌会挪到<b>手牌最右边</b>并取消选中，方便把要留的牌拎出来看。
+        没选牌时点 <b>组合</b> = 恢复默认排序。别人出牌时也能选牌 / 组合（但 出牌 / 过牌 / 提示 禁用）。</p>
       <h3>战绩（只记输赢局数）</h3>
-      <p>经典玩法：每局<b>头游赢 1 局</b>，其余各家各<b>输 1 局</b>；A3 地主按下面规则记<b>胜 / 平 / 负</b>。</p>
-      <p>开启设置里的「<b>非 A3 打到末游</b>」后：3 人 / 4 人局不再「头游即结束」，而是接着打到你的名次定下来——你<b>头游</b>＝胜，你<b>第 2 名</b>＝平，其余＝负（已有两名其他人先出完、你最好只能第 3 名时即判负收场）。此设置对 A3 地主无效。</p>
+      <p>经典玩法：每局<b>头游赢 1 局</b>，其余各输 1 局。开启「非 A3 打到末游」后改为按你的名次记：头游＝胜，第 2 名＝平，其余＝负。联机有多个真人时，要等<b>所有真人都打完</b>才收场，剩下的电脑位自动补名次。</p>
       <h3>A3 地主（找朋友）</h3>
       <ul>
         <li>仅 4 人局。发牌后，持 <b>♠A</b> 与持 <b>♠3</b> 的两人<b>暗中成一队</b>（地主队），另外两家为农民队。</li>
@@ -354,20 +328,12 @@
         <li>若 <b>一人独拿 ♠A♠3</b>：他第 1 名胜、第 2 名平、第 3/4 名负，其余三家为反方。</li>
         <li>电脑<b>会配合队友</b>（不顶队友、喂单张、抢回领出权后再喂），且只凭公开信息判断队友，<b>不会偷看</b>身份。</li>
       </ul>
-      <p>开始界面（正中的「开始游戏」按钮下面）随时能看到你自己的输赢局数；
-        每局结束的结算表只列各家<b>名次 / 剩余张数 / 剩余的具体牌</b>，下面一行是你的累计输赢局数。</p>
-      <p>战绩只保存在本次打开页面期间——刷新或关掉页面就重新从 0 开始算。</p>
+      <p>开始界面能看到你的累计输赢；战绩只在本次打开页面期间保存，刷新即清零。</p>
       <h3>联机（和朋友一起玩）</h3>
       <ul>
-        <li>点顶栏或开始界面的 <b>🌐 联机</b>：一个人「开房」拿到 4 位房间码，其他人输房间码加入。</li>
-        <li><b>不需要服务器</b>：开房的那台设备既是玩家也是「房主」，其他人通过 WebRTC 直连它。
-            <b>异地也能玩</b>，不必在同一个 Wi-Fi 下。</li>
-        <li>房主负责发牌、校验每个人的出牌、以及<b>替没坐满的座位打电脑</b>。</li>
-        <li><b>看不见别人的牌</b>：服务端只把「你自己的手牌 + 公开信息」发给你。
-            就算开浏览器的开发者工具，也只能看到自己那 13 张。</li>
-        <li>A3 地主的暗队身份同样保密：谁捏着 ♠A / ♠3，只有亮牌那一刻才会公开。</li>
-        <li>房间没坐满也能开：空座位由电脑补上；掉了线的人，房主会先替他打，重连回来接着玩。</li>
-        <li>房主把页面关掉，这一局就结束了。</li>
+        <li>点 <b>🌐 联机</b> 开房拿 4 位房间码，别人输码加入；开房设备即房主，直连、异地也能玩。</li>
+        <li>房主负责发牌、校验出牌，并代打空位；掉线由房主先顶，重连回来接着玩。</li>
+        <li><b>看不见别人的牌</b>：每人只收到自己的手牌 + 公开信息，A3 暗队身份同样保密。</li>
       </ul>
     </div>
     <div class="dialog-actions">

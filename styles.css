@@ -221,6 +221,7 @@ html, body {
   font-size: 12.5px;
   white-space: nowrap;
 }
+.pname[hidden] { display: none; }
 .pname.active {
   border-color: var(--gold);
   box-shadow: 0 0 0 2px rgba(232, 195, 122, .25), 0 0 16px rgba(232, 195, 122, .35);
@@ -420,6 +421,7 @@ html, body {
   font-size: 13px; color: #cfe3d8;
   padding: 0 6px 2px;
 }
+.me-head[hidden] { display: none; }
 .me-name { font-weight: 700; color: #fff; }
 .me-count { color: #9dbfae; font-size: 12px; }
 .spacer { flex: 1; }
@@ -467,14 +469,16 @@ html, body {
 .dialog h2 { margin: 0 0 14px; font-size: 20px; color: var(--gold); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
 
-/* 设置 / 规则面板：内容超出时仍可滚动，但不显示滚动条 */
+/* 设置 / 规则 / 联机面板：内容超出时仍可滚动，但不显示滚动条 */
 #settingsOverlay .dialog,
-#rulesOverlay .dialog {
+#rulesOverlay .dialog,
+#lobbyOverlay .dialog {
   scrollbar-width: none;        /* Firefox */
   -ms-overflow-style: none;     /* 旧版 Edge / IE */
 }
 #settingsOverlay .dialog::-webkit-scrollbar,
-#rulesOverlay .dialog::-webkit-scrollbar { width: 0; height: 0; display: none; }  /* Chrome / Safari / Edge */
+#rulesOverlay .dialog::-webkit-scrollbar,
+#lobbyOverlay .dialog::-webkit-scrollbar { width: 0; height: 0; display: none; }  /* Chrome / Safari / Edge */
 
 .result-body { font-size: 13.5px; }
 
@@ -521,6 +525,13 @@ html, body {
   background: linear-gradient(170deg, #f3d99f, #d8ab4e);
   color: #2a1c00;
   font-weight: 700;
+}
+/* 联机候场：人数不够坐的选项灰掉、点不动（见 ui.js refreshModeAvailability） */
+.seg[disabled], .seg.is-disabled {
+  opacity: .35;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(1);
 }
 
 .set-note {
