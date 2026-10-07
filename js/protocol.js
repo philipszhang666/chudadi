@@ -102,6 +102,9 @@ var ProtocolNS = (function () {
       // 手牌：本人的原样，别人的只留张数 + 占位
       if (i !== seat) {
         p.hand = dummyCards((p.hand && p.hand.length) || 0);
+        // 投降者留的「剩余牌」同样只是给别人看的：只发张数占位，
+        // 牌面留到结算（结算表本来就公开各家剩余牌，见 result.detail）。
+        if (p.surrCards) p.surrCards = dummyCards(p.surrCards.length);
       }
       // 这三样是本人私有视角的缓存，本人也用不上（界面按公开信息重画），
       // 但留着会让「谁打过什么」泄露出去，直接清掉由客户端从公开记录重建。

@@ -135,10 +135,16 @@ var Room = (function () {
      */
     function apply(seat, action, cards) {
       if (!state || state.phase !== 'playing') return { ok: false, reason: '本局已结束' };
-      if (state.turn !== seat) return { ok: false, reason: '还没轮到你出牌' };
+
+      // 投降随时可点（不必轮到自己）；出牌 / 过牌必须轮到自己。
+      if (action !== 'surrender' && state.turn !== seat) {
+        return { ok: false, reason: '还没轮到你出牌' };
+      }
 
       var r;
-      if (action === 'pass') {
+      if (action === 'surrender') {
+        r = G.surrender(state, seat);
+      } else if (action === 'pass') {
         r = G.pass(state, seat);
       } else {
         r = G.play(state, seat, cards || []);

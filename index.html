@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>锄大地 · 改版（3 最大）</title>
-<link rel="stylesheet" href="styles.css?v=3.2">
+<link rel="stylesheet" href="styles.css?v=3.3">
 </head>
 <body>
 
@@ -86,6 +86,8 @@
       <button id="btnGroup" class="btn ghost"
               title="捡牌：把选中的牌一起挪到手牌最右边并取消选中（别人出牌时也能用）；没选牌时点一下恢复默认排序">组合</button>
       <button id="btnClear" class="btn ghost">取消选择</button>
+      <button id="btnSurrender" class="btn danger"
+              title="认输：本局直接判为末游（最后一名）">🏳 投降</button>
       <span class="sel-info" id="selInfo">请选择要出的牌</span>
     </div>
   </footer>
@@ -273,6 +275,18 @@
   </div>
 </div>
 
+<!-- 投降确认浮层 -->
+<div class="overlay" id="surrenderOverlay" hidden>
+  <div class="dialog">
+    <h2>确定投降？</h2>
+    <p class="set-note">投降后本局你直接判为 <b>末游（最后一名）</b>，这局按规则结算 / 结束。确定要投降吗？</p>
+    <div class="dialog-actions">
+      <button id="btnSurrenderCancel" class="btn ghost">再想想</button>
+      <button id="btnSurrenderConfirm" class="btn danger">确定投降</button>
+    </div>
+  </div>
+</div>
+
 <!-- 结算浮层 -->
 <div class="overlay" id="overlay" hidden>
   <div class="dialog">
@@ -359,20 +373,20 @@
 </div>
 
 <!-- 联机依赖：PeerJS（已 vendor 到本地，不依赖 CDN） -->
-<script src="vendor/peerjs.min.js?v=3.2"></script>
+<script src="vendor/peerjs.min.js?v=3.3"></script>
 
-<script src="js/cards.js?v=3.2"></script>
-<script src="js/game.js?v=3.2"></script>
-<script src="js/determinize.js?v=3.2"></script>
-<script src="js/endgame.js?v=3.2"></script>
-<script src="js/mcts.js?v=3.2"></script>
-<script src="js/ai.js?v=3.2"></script>
-<script src="js/sound.js?v=3.2"></script>
+<script src="js/cards.js?v=3.3"></script>
+<script src="js/game.js?v=3.3"></script>
+<script src="js/determinize.js?v=3.3"></script>
+<script src="js/endgame.js?v=3.3"></script>
+<script src="js/mcts.js?v=3.3"></script>
+<script src="js/ai.js?v=3.3"></script>
+<script src="js/sound.js?v=3.3"></script>
 <!-- 联机三层：裁剪视图 → 传输 → 权威房间。必须在 ui.js 之前加载 -->
-<script src="js/protocol.js?v=3.2"></script>
-<script src="js/net.js?v=3.2"></script>
-<script src="js/room.js?v=3.2"></script>
-<script src="js/ui.js?v=3.2"></script>
-<script src="js/orientation.js?v=3.2"></script>
+<script src="js/protocol.js?v=3.3"></script>
+<script src="js/net.js?v=3.3"></script>
+<script src="js/room.js?v=3.3"></script>
+<script src="js/ui.js?v=3.3"></script>
+<script src="js/orientation.js?v=3.3"></script>
 </body>
 </html>

@@ -9,7 +9,7 @@
 
   // 游戏版本号：显示在设置面板底部。每次发版改这里一处；
   // 并把 index.html 里所有 styles.css?v=… / *.js?v=… 的版本号改成同一个值（查找替换，一次性全改）。
-  var APP_VERSION = 'V3.2';
+  var APP_VERSION = 'V3.3';
 
   var state = null;
   var selected = {};        // 选中的牌 id
@@ -57,6 +57,12 @@
   function playerName(seat) {
     if (!state || !state.players[seat]) return '';
     return isMe(seat) ? '你' : state.players[seat].name;
+  }
+
+  /** 座位 / 手牌区显示「剩几张」用：投降者手牌已清空，改用他退场时留下的张数 */
+  function shownCount(p) {
+    if (!p) return 0;
+    return p.surrendered ? ((p.surrCards && p.surrCards.length) || 0) : p.hand.length;
   }
 
   /* ---------------- 设置 ---------------- */
@@ -318,7 +324,7 @@
     var mine = myIdx();
     var me = state.players[mine];
     var inline = $('myCountInline');
-    if (inline) inline.textContent = me.hand.length + ' 张';
+    if (inline) inline.textContent = shownCount(me) + ' 张';
 
     // 名字元素在 index.html 里（不要清空 box，否则会把它删掉）
     var name = box.querySelector ? box.querySelector('.pname') : null;
@@ -355,7 +361,7 @@
     var name = el('div', 'pname' + (state.turn === player.index && state.phase === 'playing' ? ' active' : ''));
     name.appendChild(el('span', 'dot'));
     name.appendChild(el('span', null, player.name));
-    name.appendChild(el('span', 'pc', player.hand.length + ' 张'));
+    name.appendChild(el('span', 'pc', shownCount(player) + ' 张'));
     box.appendChild(name);
 
     var info = el('div', 'pinfo');
@@ -372,7 +378,13 @@
 
     // 本墩出牌 / 手牌
     var wrap = el('div', 'pcards');
-    if (player.hand.length === 0 && !(player.lastPlay && state.currentOwner === player.index)) {
+    if (player.surrendered) {
+      // 投降：牌已退场，仍按退场时的张数摆牌背（名次在上面已显示）
+      var pileS = el('div', 'pile');
+      var sc = (player.surrCards && player.surrCards.length) || 0;
+      for (var s = 0; s < sc; s++) pileS.appendChild(cardEl(null, true, true));
+      wrap.appendChild(pileS);
+    } else if (player.hand.length === 0 && !(player.lastPlay && state.currentOwner === player.index)) {
       wrap.appendChild(el('div', 'passed-badge', '已出完'));
     } else if (player.lastPlay && state.currentOwner === player.index) {
       playCardsInDisplayOrder(player.lastPlay).forEach(function (c) {
@@ -556,6 +568,7 @@
 
   /** 未开局的画面：牌桌清空，只留正中的「开始游戏」按钮 */
   function renderIdle() {
+    if ($('surrenderOverlay')) $('surrenderOverlay').hidden = true;
     // 座位清空（座位框保留，开局时布局不跳动）
     SEAT_SLOTS.forEach(function (id) {
       var box = $(id);
@@ -586,7 +599,7 @@
     // 注意：btnClear 不在这里禁用 —— updateSelection / syncTurnUI 都不管它的
     // disabled，一旦在未开局时禁掉，整局都会是灰的。它在未开局时点了也是空操作。
     // btnGroup 可以禁（newGame 里会重新启用），因为没手牌时捡牌没有意义。
-    ['btnPass', 'btnPlay', 'btnHint', 'btnGroup'].forEach(function (id) {
+    ['btnPass', 'btnPlay', 'btnHint', 'btnGroup', 'btnSurrender'].forEach(function (id) {
       if ($(id)) $(id).disabled = true;
     });
     setTip('');
@@ -770,6 +783,11 @@
     $('btnPass').disabled = !myTurn || state.current === null || netBusy;
     $('btnPlay').disabled = !myTurn || !cards.length || netBusy;
     $('btnHint').disabled = !myTurn || !legal.length;
+    if ($('btnSurrender')) {
+      var meP = state.players[myIdx()];
+      $('btnSurrender').disabled =
+        state.phase !== 'playing' || netBusy || !!(meP && meP.surrendered);
+    }
 
     if (state.phase === 'over') {
       setSelInfo('本局已结束');
@@ -1026,6 +1044,52 @@
     if (!r.ok) { setSelInfo('✗ ' + r.reason, 'err'); sfx('error'); return; }
     selected = {};
     finishMove(null, null);
+  }
+
+  /* ---------------- 投降 ----------------
+     本局进行中随时可点；点了先弹确认框，确认后：
+       单机 —— 本地把这一步落到 state 上（投降者判末游，再按原规则收场 / 继续）；
+       联机 —— 把手上的投降发给房主，由房主统一结算并广播。 */
+
+  /** 弹「确定投降？」确认框 */
+  function openSurrenderConfirm() {
+    if (!state || state.phase !== 'playing') return;
+    var me = state.players[myIdx()];
+    if (me && me.surrendered) return;
+    if ($('surrenderOverlay')) $('surrenderOverlay').hidden = false;
+  }
+
+  function closeSurrenderConfirm() {
+    if ($('surrenderOverlay')) $('surrenderOverlay').hidden = true;
+  }
+
+  /** 确认投降 */
+  function doSurrender() {
+    closeSurrenderConfirm();
+    if (!state || state.phase !== 'playing') return;
+    if (netBusy) return;
+    var me = state.players[myIdx()];
+    if (me && me.surrendered) return;
+
+    if (mode === 'online') {
+      submitOnlineAction('surrender', null);
+      return;
+    }
+
+    // 单机：先作废在途的电脑定时器，免得旧局面算出的走法落到新局面
+    clearTimers();
+    busy = false;
+    botTimerPending = false;
+    var r = Game.surrender(state, myIdx());
+    if (!r.ok) { setSelInfo('✗ ' + r.reason, 'err'); sfx('error'); return; }
+    selected = {};
+    legalCache = { turn: -1, current: null, moveCount: -1, list: [] };
+    CD.clearMoveCache();
+    renderAll();
+    syncTurnUI();
+    if (state.phase === 'over') { scheduleResult(); return; }
+    if (isMyTurn()) { announceMyTurn(); return; }
+    scheduleBots();
   }
 
   /**
@@ -1386,11 +1450,16 @@
 
     // ---- 经典玩法：头游即赢 ----
     // 写进「开始界面」，关掉结算浮层后还能看到上一局是谁赢的
-    lastSummary = '上一局：' + (isMe(res.winner) ? '你赢了！' : state.players[res.winner].name + ' 先出完');
-
-    sfx(isMe(res.winner) ? 'win' : 'lose');
-
-    $('resultTitle').textContent = isMe(res.winner) ? '🎉 你赢了！' : state.players[res.winner].name + ' 先出完';
+    if (res.bySurrender) {
+      // 靠投降提前收场：其实没人「先出完」，标题中性一点（名次照常列）
+      lastSummary = '上一局：本局结束';
+      sfx('lose');
+      $('resultTitle').textContent = '本局结束';
+    } else {
+      lastSummary = '上一局：' + (isMe(res.winner) ? '你赢了！' : state.players[res.winner].name + ' 先出完');
+      sfx(isMe(res.winner) ? 'win' : 'lose');
+      $('resultTitle').textContent = isMe(res.winner) ? '🎉 你赢了！' : state.players[res.winner].name + ' 先出完';
+    }
     var body = $('resultBody');
     body.innerHTML = '';
 
@@ -2179,6 +2248,7 @@
     var wasResult = !!(over && !over.hidden);
     if (over) over.hidden = true;
     if ($('settingsOverlay')) $('settingsOverlay').hidden = true;
+    if ($('surrenderOverlay')) $('surrenderOverlay').hidden = true;
     if (wasResult && state && state.phase === 'over') showStartScreen();
   }
 
@@ -2308,6 +2378,9 @@
     $('btnPlay').addEventListener('click', doPlay);
     $('btnPass').addEventListener('click', doPass);
     $('btnHint').addEventListener('click', doHint);
+    if ($('btnSurrender')) $('btnSurrender').addEventListener('click', openSurrenderConfirm);
+    if ($('btnSurrenderConfirm')) $('btnSurrenderConfirm').addEventListener('click', doSurrender);
+    if ($('btnSurrenderCancel')) $('btnSurrenderCancel').addEventListener('click', closeSurrenderConfirm);
     $('btnClear').addEventListener('click', function () {
       selected = {};
       updateSelection();
@@ -2388,7 +2461,7 @@
 
     // 键盘快捷键
     document.addEventListener('keydown', function (e) {
-      if (!$('overlay').hidden || !$('settingsOverlay').hidden) {
+      if (!$('overlay').hidden || !$('settingsOverlay').hidden || !$('surrenderOverlay').hidden) {
         if (e.key === 'Escape') closeOverlays();
         return;
       }

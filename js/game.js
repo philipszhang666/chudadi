@@ -106,6 +106,7 @@ var Game = (function () {
       fivePlays: 0,             // 已经出过几手五张牌（供 AI 判断外面的五张还剩多少）
       passes: [],               // 过牌反推（hardv3）：{player, play} —— 该家压不过 play
       finishCount: 0,           // A3 地主：已经出完牌的人数（用来定名次）
+      surrenderCount: 0,        // 已经投降的人数（决定投降者的末位名次：4、3、2…）
       revealed: {},             // A3 地主：♠A / ♠3 是否已亮出（id -> 出牌人 index）
       landlord: null,           // A3 地主：暗队信息（未启用时为 null）
       nonA3ToLast: false        // 非 A3「打到末游」：按名次判胜负（A3 局恒为 false）
@@ -395,6 +396,68 @@ var Game = (function () {
   }
 
   /**
+   * 投降：把该玩家直接判为末位名次（先投的排最后：第 4、3、2… 名）。
+   * 牌从手牌移走（视作已出局：轮次自动跳过、AI 不再当他还在场上），
+   * 然后按本局原规则判断要不要立刻收场：收了就正常结算；没收就让
+   * 其余人接着打，最后结算时投降者仍占着这个末位名次。
+   */
+  function surrender(state, playerIndex) {
+    if (state.phase === 'over') return { ok: false, reason: '本局已结束' };
+    var p = state.players[playerIndex];
+    if (!p) return { ok: false, reason: '未知玩家' };
+    if (p.finished || p.surrendered) return { ok: false, reason: p.name + ' 已经出局' };
+
+    var n = state.players.length;
+    state.surrenderCount = (state.surrenderCount || 0) + 1;
+    p.surrendered = true;
+    p.surrOrder = state.surrenderCount;
+    p.surrRank = n - state.surrenderCount + 1;   // 4、3、2……
+    p.rank = p.surrRank;
+    p.surrCards = _CD.sortDesc(p.hand.slice());  // 留一份，结算表里照样显示他剩什么牌
+    p.hand = [];                                 // 退场：不再占场上位置
+    p.played = [];
+    p.passed = false;
+    p.finished = true;
+
+    // 第一手必须含 ♦4；若持 ♦4 的人（也就是首出者）弃了牌，牌已退场，
+    // 这条约束就无从满足（谁都拿不出 ♦4），撤掉它，让下家自由领出。
+    if (state.isFirstPlay &&
+        p.surrCards.some(function (c) { return c.id === _CD.RULES.firstCard; })) {
+      state.isFirstPlay = false;
+    }
+
+    pushLog(state, p.name + ' 投降（第 ' + p.surrRank + ' 名）');
+
+    var gameOver = false;
+    if (surrenderDecided(state)) {
+      gameOver = true;
+      endGame(state, undefined);
+    } else if (state.turn === playerIndex) {
+      // 正好轮到他：跳过，并看这一墩是否因此结束
+      advance(state);
+      settleTrick(state);
+    }
+    return { ok: true, gameOver: gameOver };
+  }
+
+  /**
+   * 有人投降后，本局是否该立刻收场（各自沿用该模式原有的结束口径）。
+   *   · 只剩一家还有牌（其余都出完 / 投降了）→ 一定收；
+   *   · A3 地主 → 交给 landlordDecided（队友还没定名次就接着打）；
+   *   · 其余（经典 / 非 A3「打到末游」）→ 交给 finishedDecided：
+   *       · 单机（只有一个真人）：这唯一真人投降 = 没真人还在打了 → 立刻收；
+   *       · 联机：还有真人没打完就继续，等他们都打完再收（经典再等有人出完）。
+   */
+  function surrenderDecided(state) {
+    var remaining = state.players.filter(function (q) {
+      return !q.finished && q.hand.length > 0;
+    }).length;
+    if (remaining <= 1) return true;
+    if (state.landlord) return landlordDecided(state);
+    return finishedDecided(state);
+  }
+
+  /**
    * 结算
    * 计分：每个输家按剩余张数扣分（每张 perCard 分，≥10 张翻倍）；
    * 赢家得分 = 所有输家失分之和（人数越多赢得越多）。
@@ -403,23 +466,39 @@ var Game = (function () {
     state.phase = 'over';
     var players = state.players;
     var order;
+    var endedBySurrender = false;
 
     if (state.landlord || state.nonA3ToLast) {
-      // 打完排名次（A3 地主 / 非 A3 打到末游）：出完的按出完先后（rank 已定）；
-      // 提前结束时可能仍有多家捏着牌，这些没出完的按剩余张数从少到多补名次。
-      var rated = players.filter(function (p) { return p.rank; }).length;
-      players.filter(function (p) { return !p.rank; })
-        .sort(function (a, b) { return a.hand.length - b.hand.length; })
-        .forEach(function (p) { p.rank = ++rated; });
-      order = players.slice()
-        .sort(function (a, b) { return a.rank - b.rank; })
-        .map(function (p) { return p.index; });
-    } else {
-      order = [winnerIndex];
-      // 名次按剩余张数从少到多
-      var rest = players.filter(function (p) { return p.index !== winnerIndex; })
+      // 打完排名次（A3 地主 / 非 A3 打到末游）：
+      //   · 出完的按出完先后（rank 已定）；
+      //   · 还没出完的按剩余张数从少到多补；
+      //   · 投降的排到最后（先投的名次最大 → 排在末尾）。
+      var fin = players.filter(function (p) { return p.rank && !p.surrendered; })
+        .sort(function (a, b) { return a.rank - b.rank; });
+      var mid = players.filter(function (p) { return !p.rank && !p.surrendered; })
         .sort(function (a, b) { return a.hand.length - b.hand.length; });
-      rest.forEach(function (p) { order.push(p.index); });
+      var surr = players.filter(function (p) { return p.surrendered; })
+        .sort(function (a, b) { return a.surrRank - b.surrRank; });
+      order = fin.concat(mid).concat(surr).map(function (p) { return p.index; });
+      order.forEach(function (idx, i) { players[idx].rank = i + 1; });
+    } else {
+      // 经典：头游第一（没有头游的就取没投降、剩牌最少的那家）；其余按剩余张数；
+      // 投降的排到最后（先投的名次最大 → 排在末尾）。
+      // 「没有头游」= 靠投降提前收场（经典里正常只有有人出完才结束）。
+      endedBySurrender = (winnerIndex === undefined || winnerIndex === null) && state.surrenderCount > 0;
+      var headIdx = (winnerIndex === undefined || winnerIndex === null) ? null : winnerIndex;
+      if (headIdx === null) {
+        var cand = players.filter(function (p) { return !p.surrendered; })
+          .sort(function (a, b) { return a.hand.length - b.hand.length; });
+        if (cand.length) headIdx = cand[0].index;
+      }
+      var head = headIdx === null ? [] : [headIdx];
+      var rest = players.filter(function (p) { return p.index !== headIdx && !p.surrendered; })
+        .sort(function (a, b) { return a.hand.length - b.hand.length; });
+      var surrC = players.filter(function (p) { return p.surrendered; })
+        .sort(function (a, b) { return a.surrRank - b.surrRank; });
+      order = head.concat(rest.map(function (p) { return p.index; }))
+        .concat(surrC.map(function (p) { return p.index; }));
       order.forEach(function (idx, i) { players[idx].rank = i + 1; });
     }
 
@@ -443,10 +522,11 @@ var Game = (function () {
     var detail = [];
     order.forEach(function (idx, i) {
       var p = players[idx];
+      var restCards = p.surrendered ? (p.surrCards || []) : _CD.sortDesc(p.hand);
       detail.push({
-        index: idx, name: p.name, rank: p.rank, rest: p.hand.length,
-        restCards: _CD.sortDesc(p.hand), penalty: p.penalty,
-        doubled: i > 0 && p.hand.length >= SCORE.doubleAt,
+        index: idx, name: p.name, rank: p.rank, rest: restCards.length,
+        restCards: restCards, penalty: p.penalty,
+        doubled: i > 0 && restCards.length >= SCORE.doubleAt,
         team: landlord ? (landlord.members.indexOf(idx) >= 0 ? 'landlord' : 'farmer') : null,
         outcome: landlord ? landlord.playerOutcome[idx]
                : (state.nonA3ToLast ? rankOutcome(p.rank) : (i === 0 ? 'win' : 'lose'))
@@ -458,6 +538,7 @@ var Game = (function () {
       winnerGain: winnerGain, playerCount: players.length,
       landlord: landlord,
       ranked: !!state.nonA3ToLast,     // 非 A3「打到末游」：按名次判胜负
+      bySurrender: endedBySurrender,   // 经典：本局是靠投降提前收场（没有真正的头游）
       humanOutcome: null
     };
     if (state.nonA3ToLast) {
@@ -554,7 +635,7 @@ var Game = (function () {
     newGame: newGame, shuffle: shuffle, human: human,
     legalMoves: legalMoves, mustPass: mustPass, currentConstraint: currentConstraint,
     play: play, pass: pass, awaitHuman: awaitHuman, hintText: hintText,
-    pushLog: pushLog, playerCountOf: playerCountOf
+    surrender: surrender, pushLog: pushLog, playerCountOf: playerCountOf
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

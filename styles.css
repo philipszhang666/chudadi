@@ -184,6 +184,8 @@ html, body {
   border-color: #fff3d0;
 }
 .btn.pass { border-color: rgba(224, 91, 91, .5); color: #ffc9c9; }
+.btn.danger { border-color: rgba(224, 91, 91, .6); color: #ff9d9d; }
+.btn.danger:hover:not(:disabled) { background: rgba(224, 91, 91, .18); border-color: rgba(255, 132, 132, .8); }
 .btn.ghost { background: transparent; }
 
 /* ---------------- 牌桌 ----------------
