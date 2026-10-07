@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>锄大地 · 改版（3 最大）</title>
-<link rel="stylesheet" href="styles.css?v=3.3">
+<link rel="stylesheet" href="styles.css?v=3.4">
 </head>
 <body>
 
@@ -263,6 +263,19 @@
         </div>
       </div>
 
+      <div class="set-row solo-only" id="dealCodeRow">
+        <div class="set-label">
+          <b>对局复现</b>
+          <small>输入一局的对局代码点「开始对局」，可重现完全相同的发牌（仅单机）</small>
+          <small id="dealCodeMsg" class="deal-code-msg" hidden></small>
+        </div>
+        <div class="deal-code-input">
+          <input id="dealCodeInput" class="code-input deal-code-field" maxlength="20"
+                 autocomplete="off" spellcheck="false" placeholder="CD1-4-XXXXXX">
+          <button id="btnApplyDealCode" class="btn">开始对局</button>
+        </div>
+      </div>
+
     </div>
 
     <p class="set-note">改动人数会结束当前局并回到开始界面；其他设置立即生效。</p>
@@ -293,6 +306,7 @@
     <h2 id="resultTitle">本局结束</h2>
     <div id="resultBody" class="result-body"></div>
     <div class="dialog-actions">
+      <button id="btnReplay" class="btn ghost" hidden>🔄 同牌再来一局</button>
       <button id="btnAgain" class="btn primary">回到牌桌</button>
     </div>
   </div>
@@ -373,20 +387,20 @@
 </div>
 
 <!-- 联机依赖：PeerJS（已 vendor 到本地，不依赖 CDN） -->
-<script src="vendor/peerjs.min.js?v=3.3"></script>
+<script src="vendor/peerjs.min.js?v=3.4"></script>
 
-<script src="js/cards.js?v=3.3"></script>
-<script src="js/game.js?v=3.3"></script>
-<script src="js/determinize.js?v=3.3"></script>
-<script src="js/endgame.js?v=3.3"></script>
-<script src="js/mcts.js?v=3.3"></script>
-<script src="js/ai.js?v=3.3"></script>
-<script src="js/sound.js?v=3.3"></script>
+<script src="js/cards.js?v=3.4"></script>
+<script src="js/game.js?v=3.4"></script>
+<script src="js/determinize.js?v=3.4"></script>
+<script src="js/endgame.js?v=3.4"></script>
+<script src="js/mcts.js?v=3.4"></script>
+<script src="js/ai.js?v=3.4"></script>
+<script src="js/sound.js?v=3.4"></script>
 <!-- 联机三层：裁剪视图 → 传输 → 权威房间。必须在 ui.js 之前加载 -->
-<script src="js/protocol.js?v=3.3"></script>
-<script src="js/net.js?v=3.3"></script>
-<script src="js/room.js?v=3.3"></script>
-<script src="js/ui.js?v=3.3"></script>
-<script src="js/orientation.js?v=3.3"></script>
+<script src="js/protocol.js?v=3.4"></script>
+<script src="js/net.js?v=3.4"></script>
+<script src="js/room.js?v=3.4"></script>
+<script src="js/ui.js?v=3.4"></script>
+<script src="js/orientation.js?v=3.4"></script>
 </body>
 </html>

@@ -568,6 +568,42 @@ html, body {
 }
 .set-version b { color: var(--gold); font-weight: 700; }
 .set-version-hint { opacity: .7; }
+
+/* ---------------- 对局复现（对局代码） ---------------- */
+/* 设置面板里的代码输入行 */
+.deal-code-input { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+.deal-code-field {
+  flex: 0 0 auto;
+  width: 150px;
+  font-size: 15px;
+  letter-spacing: 2px;
+  padding: 7px 10px;
+}
+.deal-code-msg { font-size: 11.5px; color: #9dbfae; }
+.deal-code-msg.err { color: #ff8a8a; }
+.deal-code-msg.ok { color: #7fe0a3; }
+
+/* 结算面板里的代码展示：代码 + 复制按钮 */
+.deal-code {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 9px 12px;
+  background: rgba(0, 0, 0, .28);
+  border: 1px dashed rgba(255, 255, 255, .18);
+  border-radius: 10px;
+}
+.deal-code-label { font-size: 12px; color: #9dbfae; }
+.deal-code-value {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: var(--gold);
+  word-break: break-all;
+}
+.deal-code-hint { font-size: 11.5px; color: #9dbfae; margin: 6px 0 0; line-height: 1.5; }
 .result-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
 /* 表头和内容一律左对齐 */
 .result-table th, .result-table td { padding: 7px 8px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, .08); }

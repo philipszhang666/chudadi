@@ -9,9 +9,10 @@
 
   // 游戏版本号：显示在设置面板底部。每次发版改这里一处；
   // 并把 index.html 里所有 styles.css?v=… / *.js?v=… 的版本号改成同一个值（查找替换，一次性全改）。
-  var APP_VERSION = 'V3.3';
+  var APP_VERSION = 'V3.4';
 
   var state = null;
+  var currentDeal = null;   // 当前这局的对局（seed + 模式），结算时编成「对局代码」
   var selected = {};        // 选中的牌 id
   var legalCache = { turn: -1, current: null, list: [] };
   var busy = false;         // 电脑思考中
@@ -1399,6 +1400,33 @@
     later(showResult, 700);
   }
 
+  /** 结算面板「同牌再来一局」按钮：只有单机、且手上有对局代码时才给看 */
+  function updateReplayButton() {
+    var btn = $('btnReplay');
+    if (btn) btn.hidden = !(mode === 'solo' && currentDeal);
+  }
+
+  /** 结算面板：单机时附上本局「对局代码」，可复制 / 可同牌重开 */
+  function appendDealCode(body) {
+    if (mode !== 'solo' || !currentDeal) return;
+    var code = formatDealCode(currentDeal);
+
+    var wrap = el('div', 'deal-code');
+    wrap.appendChild(el('span', 'deal-code-label', '对局代码'));
+    wrap.appendChild(el('code', 'deal-code-value', code));
+    var copyBtn = el('button', 'btn ghost small', '复制');
+    copyBtn.addEventListener('click', function () {
+      var ok = copyText(code);
+      copyBtn.textContent = ok ? '已复制' : '复制失败';
+      setTimeout(function () { copyBtn.textContent = '复制'; }, 1200);
+    });
+    wrap.appendChild(copyBtn);
+    body.appendChild(wrap);
+
+    body.appendChild(el('p', 'deal-code-hint',
+      '在「设置」里输入这个代码点「开始对局」，就能重现这一模一样的发牌（仅单机）。'));
+  }
+
   /** 非 A3「打到末游」的结算：按玩家名次给 胜 / 平 / 负 */
   function showRankedResult(res) {
     var flat = { win: '你胜', draw: '平局', lose: '你负' };
@@ -1436,6 +1464,8 @@
     body.appendChild(el('p', null,
       myRecordText() + '　（' + res.playerCount + ' 人局 · 打到末游：头游＝胜，第 2 名＝平，其余＝负）'));
 
+    appendDealCode(body);
+
     $('overlay').hidden = false;
   }
 
@@ -1444,6 +1474,7 @@
     var res = state.result;
 
     recordTally();          // 只记输赢局数（不再累计得分）
+    updateReplayButton();   // 单机才显示「同牌再来一局」，联机隐藏
 
     if (res.landlord) { showLandlordResult(res); return; }
     if (res.ranked) { showRankedResult(res); return; }
@@ -1485,6 +1516,8 @@
 
     body.appendChild(el('p', null,
       myRecordText() + '　（' + res.playerCount + ' 人局，每局只有头游算赢，其余各家各输一局）'));
+
+    appendDealCode(body);
 
     $('overlay').hidden = false;
   }
@@ -1534,6 +1567,8 @@
       '地主队：' + teamLine + '　→　地主方' + flat[ll.landlordOutcome] + '，农民方' + flat[ll.farmerOutcome]));
 
     body.appendChild(el('p', null, myRecordText() + '　（A3 地主 · 本局：' + mine[human] + '）'));
+
+    appendDealCode(body);
 
     $('overlay').hidden = false;
   }
@@ -1588,8 +1623,115 @@
     newSoloGame();
   }
 
+  /* ---------------- 对局复现（仅单机） ----------------
+     一局的发牌完全由 32 位 seed 决定（见 game.js makeRng）：
+     对局代码 = CD1-<模式>-<seed36>，模式 3 / 4 / 4T（四人·打到末游）/ A（A3 地主）。 */
+
+  var DEAL_CODE_RE = /^CD1-([34A]T?)-([0-9A-Z]{1,7})$/;
+
+  function randomSeed32() {
+    return (Math.floor(Math.random() * 0x100000000) >>> 0);
+  }
+
+  function dealModeTag(deal) {
+    if (deal.landlord) return 'A';
+    var tag = deal.playerCount === 3 ? '3' : '4';
+    return deal.nonA3ToLast ? tag + 'T' : tag;
+  }
+
+  function formatDealCode(deal) {
+    if (!deal) return '';
+    return 'CD1-' + dealModeTag(deal) + '-' + (deal.seed >>> 0).toString(36).toUpperCase();
+  }
+
+  /** 解析对局代码 → { seed, playerCount, landlord, nonA3ToLast }；不合法返回 null */
+  function parseDealCode(code) {
+    if (!code) return null;
+    var s = String(code).trim().toUpperCase().replace(/\s+/g, '');
+    var m = DEAL_CODE_RE.exec(s);
+    if (!m) return null;
+    var seed = parseInt(m[2], 36);
+    if (!isFinite(seed) || seed < 0 || seed > 0xFFFFFFFF) return null;
+    var tag = m[1];
+    var landlord = tag.charAt(0) === 'A';
+    return {
+      seed: seed >>> 0,
+      landlord: landlord,
+      playerCount: landlord ? 4 : (tag.charAt(0) === '3' ? 3 : 4),
+      nonA3ToLast: !landlord && tag.charAt(1) === 'T'
+    };
+  }
+
+  /** 用一份对局（seed + 模式）开局：仅单机 */
+  function startDeal(deal) {
+    if (mode === 'online') { setTip('对局复现只在单机模式下可用', 'err'); return; }
+    if (!deal) return;
+    // 让设置面板与代码里的模式对齐（并存档），避免「面板显示 4 人、实际 3 人」
+    settings.landlord = !!deal.landlord;
+    settings.playerCount = deal.landlord ? 4 : (deal.playerCount === 3 ? 3 : 4);
+    settings.nonA3ToLast = !!deal.nonA3ToLast;
+    saveSettings();
+    applySettingsToUI();
+    newSoloGame(deal);
+  }
+
+  /** 结算面板「同牌再来一局」：用当前这局的对局代码重开 */
+  function replayCurrentDeal() {
+    if (mode === 'online' || !currentDeal) { showStartScreen(); return; }
+    startDeal(currentDeal);
+  }
+
+  /** 设置面板「开始对局」：读输入框 → 解析 → 开局（仅单机） */
+  function applyDealCodeInput() {
+    var input = $('dealCodeInput');
+    var deal = parseDealCode(input ? input.value : '');
+    if (!deal) { setDealCodeMsg('对局代码无效，请检查后重试', 'err'); sfx('error'); return; }
+    setDealCodeMsg('', '');
+    if ($('settingsOverlay')) $('settingsOverlay').hidden = true;
+    startDeal(deal);
+  }
+
+  function setDealCodeMsg(text, kind) {
+    var m = $('dealCodeMsg');
+    if (!m) return;
+    m.textContent = text || '';
+    m.hidden = !text;
+    m.classList.toggle('err', kind === 'err');
+    m.classList.toggle('ok', kind === 'ok');
+  }
+
+  /** 复制文本（优先同步 execCommand，失败再退回剪贴板 API） */
+  function copyText(text) {
+    var done = false;
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      done = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) { done = false; }
+    if (!done && navigator.clipboard && navigator.clipboard.writeText) {
+      try { navigator.clipboard.writeText(text); done = true; } catch (e2) { done = false; }
+    }
+    return done;
+  }
+
   /** 开始新的一局：发牌、把「开始游戏」界面收起来、该谁先出就谁先出 */
-  function newSoloGame() {
+  function newSoloGame(deal) {
+    if (!deal) {
+      deal = {
+        seed: randomSeed32(),
+        playerCount: settings.playerCount,
+        landlord: settings.landlord,
+        nonA3ToLast: settings.nonA3ToLast
+      };
+    }
+    currentDeal = deal;
     clearTimers();
     ensureWorker();          // 预热 AI 后台线程（先把各家 AI 模块加载好）
     busy = false;
@@ -1602,7 +1744,12 @@
     tailIds = [];                           // 新一局：手牌重新按大小排
     dragging = false;                       // 收尾可能残留的拖动状态
     suppressClick = false;
-    state = Game.newGame({ playerCount: settings.playerCount, landlord: settings.landlord, nonA3ToLast: settings.nonA3ToLast });
+    state = Game.newGame({
+      playerCount: deal.playerCount,
+      landlord: deal.landlord,
+      nonA3ToLast: deal.nonA3ToLast,
+      rng: Game.makeRng(deal.seed)          // 固定 seed → 发牌完全一致（3 人局补牌也一致）
+    });
     presentBoard();
     sfx('deal');
     renderAll();
@@ -2303,6 +2450,12 @@
       row.hidden = isClient;
     });
 
+    // 「对局复现」只在单机显示（联机由房主发牌，客户端无法自定牌局）
+    var soloRows = document.querySelectorAll('.solo-only');
+    Array.prototype.forEach.call(soloRows, function (row) {
+      row.hidden = (mode === 'online');
+    });
+
     var settingsNote = $('settingsHostNote');
     if (settingsNote) settingsNote.hidden = !isClient;
 
@@ -2401,12 +2554,18 @@
       // （看得到战绩，开始游戏按钮置灰，等房主发牌）。
       showStartScreen();
     });
+    // 结算浮层「同牌再来一局」：用本局的对局代码立刻重开（仅单机显示）
+    if ($('btnReplay')) $('btnReplay').addEventListener('click', function () {
+      $('overlay').hidden = true;
+      replayCurrentDeal();
+    });
     // 只有这一个地方会发牌：正中的「开始游戏」
     if ($('btnStart')) $('btnStart').addEventListener('click', function () { newGame(); });
 
     // 设置
     $('btnSettings').addEventListener('click', function () {
       $('settingsOverlay').hidden = false;
+      applyRoleVisibility();       // 单机才显示「对局复现」行，联机隐藏
       refreshModeAvailability();   // 按当前在线人数刷新可选性
     });
     $('btnCloseSettings').addEventListener('click', function () {
@@ -2419,6 +2578,13 @@
       showStartScreen();
       setTip('设置已生效，点「开始游戏」发牌');
     });
+
+    // 设置面板「对局复现」：输入对局代码 → 直接发这一模一样的牌（仅单机）
+    if ($('btnApplyDealCode')) $('btnApplyDealCode').addEventListener('click', applyDealCodeInput);
+    if ($('dealCodeInput')) $('dealCodeInput').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); applyDealCodeInput(); }
+    });
+
     bindPlayerMode();
     // 联机时电脑难度由房主决定（AI 跑在房主那台设备上），
     // 客户端改了也不会生效，所以直接拦住，别让设置面板骗人
@@ -2522,6 +2688,9 @@
   window.__game = {
     get state() { return state; },
     newGame: newGame,
+    get deal() { return currentDeal; },               // 当前对局（seed + 模式）
+    dealCode: function () { return currentDeal ? formatDealCode(currentDeal) : ''; },
+    startDeal: startDeal,                             // 控制台里用代码直接开局
     // 「同步」发出后等房主回包的上限（毫秒）；超时仍无回音就强制重连。
     // 测试里可调小，免得干等。
     resyncFallbackMs: 3500,
